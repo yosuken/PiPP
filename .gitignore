@@ -1,12 +1,31 @@
+### test data (large fixtures); test code under test/1/ is NOT ignored
+/test/example1/
+
 ### bundle related files
-# /vendor/*
-# /.bundle/*
+# /vendor/
+# /.bundle/
 # Gemfile.lock
 
 ### file cache
 *.swp
 *~
 .nfs*
+
+### editor / IDE
+.DS_Store
+.idea/
+*.iml
+.vscode/
+
+### Python scratch (taxtastic/apples)
+__pycache__/
+*.pyc
+*.egg-info/
+
+### editing residue
+*.bak
+*.orig
+*.rej
 
 ### "old" directory
 /old
@@ -15,14 +34,13 @@
 /my.*
 ### pbslog
 /pbslog
-### test output directory
-/test*
 
-### binary of witch-ng
+### binary of witch-ng (large; users place it manually)
 /bin/witch-ng
 
 ### Rust build artifacts
 /rust/target/
 
+### local-only dev tooling
 /.filenum/
 /.ruby-lsp/

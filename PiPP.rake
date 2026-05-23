@@ -417,8 +417,6 @@ task "01-2b.parse_hmmsearch", ["step"] do |t, args|
   (puts "Already done. Skipped." ; next) if File.exist?("#{Logdir}/#{t.name.split(":")[-1]}/exit") ### skip if already done
   outs   = []
 
-  script = "#{__dir__}/script/parse_hmmsearch.rb"
-
   fa    = $fque[:fasta]
   idir  = "#{PreFildir}/#{$fque[:name]}/out"
 
@@ -437,11 +435,11 @@ task "01-2b.parse_hmmsearch", ["step"] do |t, args|
       }
     }
 
-    ### [2025-09-18 use parse_hmmsearch.rb]
+    ### [2026-05-23 use pipp_util parse-hmmsearch]
     flog    = "#{odir}/parse.log"
-    option  = "-ge #{Evalue} -e #{EvalueDom} --create-evalue-table --min-hmm-len-dom #{MinHmmLenDom} --min-hmm-cov-dom #{MinHmmCovDom} --min-ali-len-dom #{MinAliLenDom} --min-ali-cov-dom #{MinAliCovDom} "
+    option  = "--gene-evalue #{Evalue} --evalue #{EvalueDom} --create-evalue-table --min-hmm-len-dom #{MinHmmLenDom} --min-hmm-cov-dom #{MinHmmCovDom} --min-ali-len-dom #{MinAliLenDom} --min-ali-cov-dom #{MinAliCovDom} "
     option += "--min-hmm-len #{MinHmmLen} --min-hmm-cov #{MinHmmCov} --min-ali-len #{MinAliLen} --min-ali-cov #{MinAliCov}"
-    outs << "ruby #{script} #{option} -i #{fhmm} -f #{fa} -o #{odir} >#{flog} 2>&1"
+    outs << "#{PIPP_UTIL} parse-hmmsearch #{option} -i #{fhmm} -f #{fa} -o #{odir} >#{flog} 2>&1"
   end
 
   WriteBatch.call(t, Jobdir, outs)

@@ -233,3 +233,176 @@ fn import_aligned_positions(conn: &Connection, refpkg: &str, path: &Path) -> Res
     app.flush()?;
     Ok(n)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn fresh_conn() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::schema::create_all(&conn).unwrap();
+        conn
+    }
+
+    fn write_tsv(contents: &str) -> tempfile::NamedTempFile {
+        let mut f = tempfile::Builder::new().suffix(".tsv").tempfile().unwrap();
+        f.write_all(contents.as_bytes()).unwrap();
+        f.flush().unwrap();
+        f
+    }
+
+    fn count(conn: &Connection, table: &str) -> i64 {
+        conn.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+            .unwrap()
+    }
+
+    // --- parse_opt_* helpers ---
+
+    #[test]
+    fn parse_opt_f64_handles_values_and_missing() {
+        assert_eq!(parse_opt_f64("1.5").unwrap(), Some(1.5));
+        assert_eq!(parse_opt_f64("0").unwrap(), Some(0.0));
+        assert_eq!(parse_opt_f64("  2.0 ").unwrap(), Some(2.0));
+        assert_eq!(parse_opt_f64("").unwrap(), None);
+        assert_eq!(parse_opt_f64("NA").unwrap(), None);
+        assert_eq!(parse_opt_f64("nan").unwrap(), None);
+        assert_eq!(parse_opt_f64("NaN").unwrap(), None);
+        assert!(parse_opt_f64("abc").is_err());
+    }
+
+    #[test]
+    fn parse_opt_i64_handles_values_and_missing() {
+        assert_eq!(parse_opt_i64("42").unwrap(), Some(42));
+        assert_eq!(parse_opt_i64("-3").unwrap(), Some(-3));
+        assert_eq!(parse_opt_i64("").unwrap(), None);
+        assert_eq!(parse_opt_i64("NA").unwrap(), None);
+        assert!(parse_opt_i64("1.5").is_err());
+    }
+
+    // --- import_assignments ---
+
+    #[test]
+    fn import_assignments_loads_rows_and_records_refpkg() {
+        let conn = fresh_conn();
+        let f = write_tsv(
+            "name\tLWR\tfract\taLWR\tafract\ttaxopath\n\
+             seq1\t0.0\t0.0\t1.0\t1.0\tBacteria\n\
+             seq1\t0.5\t0.5\t0.5\t0.5\tBacteria;E.coli\n\
+             seq2\t0.4\t0.4\t1.0\t1.0\tEukaryota\n",
+        );
+        let n = import_assignments(&conn, "rp_test", f.path()).unwrap();
+        assert_eq!(n, 3);
+        assert_eq!(count(&conn, "assignments"), 3);
+
+        let refpkg: String = conn
+            .query_row("SELECT DISTINCT refpkg FROM assignments", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(refpkg, "rp_test");
+
+        let (lwr, taxopath): (f64, String) = conn
+            .query_row(
+                "SELECT LWR, taxopath FROM assignments WHERE query_name='seq1' AND aLWR=0.5",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(lwr, 0.5);
+        assert_eq!(taxopath, "Bacteria;E.coli");
+    }
+
+    #[test]
+    fn import_assignments_rejects_short_rows() {
+        let conn = fresh_conn();
+        let f = write_tsv("name\tLWR\tfract\taLWR\tafract\ttaxopath\nseq1\t0.5\t0.5\n");
+        // csv reader is strict (flexible=false), so the short row triggers
+        // an error during record read; we just verify the import fails.
+        assert!(import_assignments(&conn, "rp", f.path()).is_err());
+    }
+
+    // --- import_aa_features ---
+
+    #[test]
+    fn import_aa_features_loads_28_cols() {
+        let conn = fresh_conn();
+        let header = "gene\tlen\tlen_of_std_aa\tavg_MW\tN-ARSC\tC-ARSC\tS-ARSC\t\
+                      K\tR\tH\tD\tE\tN\tQ\tS\tT\tY\tA\tV\tL\tI\tP\tF\tM\tW\tG\tC\tothers";
+        let row1 = "seq1\t100\t100\t120.5\t0.5\t0.3\t0.1\t\
+                    5\t5\t2\t8\t8\t5\t3\t7\t6\t3\t7\t7\t8\t6\t5\t4\t2\t1\t5\t3\t0";
+        let f = write_tsv(&format!("{header}\n{row1}\n"));
+
+        let n = import_aa_features(&conn, "rp", f.path()).unwrap();
+        assert_eq!(n, 1);
+
+        let (gene, len, avg_mw, aa_k, aa_others): (String, i32, f64, i32, i32) = conn
+            .query_row(
+                "SELECT query_name, len, avg_mw, aa_K, aa_others FROM aa_features",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+            )
+            .unwrap();
+        assert_eq!(gene, "seq1");
+        assert_eq!(len, 100);
+        assert_eq!(avg_mw, 120.5);
+        assert_eq!(aa_k, 5);
+        assert_eq!(aa_others, 0);
+    }
+
+    #[test]
+    fn import_aa_features_accepts_missing_values() {
+        let conn = fresh_conn();
+        let header = "gene\tlen\tlen_of_std_aa\tavg_MW\tN-ARSC\tC-ARSC\tS-ARSC\t\
+                      K\tR\tH\tD\tE\tN\tQ\tS\tT\tY\tA\tV\tL\tI\tP\tF\tM\tW\tG\tC\tothers";
+        let row = "seq_empty\tNA\tNA\tNA\tNA\tNA\tNA\t\
+                   NA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA\tNA";
+        let f = write_tsv(&format!("{header}\n{row}\n"));
+        let n = import_aa_features(&conn, "rp", f.path()).unwrap();
+        assert_eq!(n, 1);
+
+        let len: Option<i32> = conn
+            .query_row("SELECT len FROM aa_features", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(len, None);
+    }
+
+    // --- import_aligned_positions ---
+
+    #[test]
+    fn import_aligned_positions_transposes_to_long() {
+        let conn = fresh_conn();
+        let f = write_tsv(
+            "query\tTM2_D51\tTM3_C78\tTM3_E102\tfract\ttaxpath\n\
+             seq1\tN\tR\tE\t1.0\tEukaryota;Animalia\n\
+             seq2\tK\tC\tD\t0.8\tBacteria\n",
+        );
+        let n = import_aligned_positions(&conn, "rp", f.path()).unwrap();
+        // 2 queries x 3 positions
+        assert_eq!(n, 6);
+        assert_eq!(count(&conn, "aligned_positions"), 6);
+
+        let residues: String = conn
+            .query_row(
+                "SELECT residues FROM aligned_positions WHERE query_name='seq1' AND pos_label='TM3_C78'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(residues, "R");
+    }
+
+    #[test]
+    fn import_aligned_positions_handles_na_taxpath() {
+        let conn = fresh_conn();
+        let f = write_tsv("query\tpos1\tfract\ttaxpath\nseq1\tA\tNA\tNA\n");
+        let n = import_aligned_positions(&conn, "rp", f.path()).unwrap();
+        assert_eq!(n, 1);
+
+        let (fract, taxpath): (Option<f64>, Option<String>) = conn
+            .query_row("SELECT fract, taxpath FROM aligned_positions", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(fract, None);
+        assert_eq!(taxpath, None);
+    }
+}

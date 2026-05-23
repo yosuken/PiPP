@@ -12,6 +12,9 @@ clap = { version = "4", features = ["derive"] }
 csv = "1"
 duckdb = { version = "1", features = ["bundled"] }
 
+[dev-dependencies]
+tempfile = "3"
+
 [profile.release]
 opt-level = 3
 lto = "thin"

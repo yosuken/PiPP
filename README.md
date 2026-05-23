@@ -1,31 +1,32 @@
 
 # PiPP - a Pipeline for Phylogenetic Placement
 
-[![license](https://img.shields.io/github/license/mashape/apistatus.svg)](/LICENSE)
-[![size](https://img.shields.io/github/size/webcaetano/craft/build/phaser-craft.min.js.svg)]()
+[![CI](https://github.com/yosuken/PiPP/actions/workflows/ci.yml/badge.svg)](https://github.com/yosuken/PiPP/actions/workflows/ci.yml)
 
 ## currently PiPP is beta version. Any specification might be changed in a future version.
 PiPP is developed as a tool for phylogenetic placement onto a clade or taxonomy defined phylogenetic tree through procedures below. A large query file is acceptable.
 
 ## install
 
-### [1] dependencies
-
-Use the bundled `environment.yaml` to create a conda env with all required tools and a Rust toolchain:
+### one-liner
 
 ```
-### replace 'micromamba' with 'mamba' or 'conda' if you use either
-$ micromamba env create -f environment.yaml
+$ ./install.sh                       # micromamba; use CONDA=mamba or CONDA=conda otherwise
 $ micromamba activate PiPP_v0.4.0
 ```
 
-### [2] build `pipp_util` (bundled Rust binary)
-
-`pipp_util` ingests the per-refpkg TSV outputs into a DuckDB file at the end of the pipeline.
+`install.sh` wraps two steps. You can run them by hand if you prefer:
 
 ```
+### [1] conda env (all bio tools + rust toolchain)
+$ micromamba env create -f environment.yaml
+$ micromamba activate PiPP_v0.4.0
+
+### [2] build the bundled Rust binary `pipp_util`
 $ cargo build --release --manifest-path rust/Cargo.toml
 ```
+
+`pipp_util` ingests the per-refpkg TSV outputs into a DuckDB file at the end of the pipeline.
 
 The pipeline locates the binary in this order:
 
@@ -33,7 +34,7 @@ The pipeline locates the binary in this order:
 2. `pipp_util` found on `$PATH` (e.g. via Bioconda)
 3. `rust/target/release/pipp_util` (after the `cargo build` above)
 
-### [3] (future) Bioconda
+### (future) Bioconda
 
 A `meta.yaml` recipe is included in the repo as a skeleton for a future Bioconda package. The plan is for `pipp` to install both the Ruby orchestration and the Rust `pipp_util` binary in one shot.
 

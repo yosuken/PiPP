@@ -18,11 +18,14 @@ green() { printf "\033[1;32m%s\033[0m\n" "$*"; }
 red() { printf "\033[1;31m%s\033[0m\n" "$*" >&2; }
 
 phase_ruby() {
-  bold "=== ruby syntax ==="
-  ruby -c PiPP
-  ruby -c PiPP.rake
+  # -w adds warnings (uninitialized vars, ambiguous syntax, etc.) on top of
+  # plain `-c` syntax check. We deliberately do not run a full linter
+  # (rubocop/standardrb) to avoid style wars; `ruby -wc` catches real bugs.
+  bold "=== ruby syntax (ruby -wc) ==="
+  ruby -wc PiPP
+  ruby -wc PiPP.rake
   for f in script/*.rb; do
-    ruby -c "$f"
+    ruby -wc "$f"
   done
   green "ruby OK"
 }
@@ -36,6 +39,9 @@ phase_rust() {
 
   bold "=== rust build ==="
   cargo build --manifest-path rust/Cargo.toml --release --locked
+
+  bold "=== rust test ==="
+  cargo test --manifest-path rust/Cargo.toml --release --locked
 
   green "rust OK"
 }

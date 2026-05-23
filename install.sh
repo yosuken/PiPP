@@ -1,2 +1,46 @@
-v=PiPP_v0.3.0 && micromamba create -n $v -c conda-forge -c bioconda ruby=3.4.5 hmmer=3.4 parallel=20250822 gappa=0.9.0 pplacer=1.1.alpha19 mafft=7.520 fasttree=2.2.0 epa-ng=0.3.8 python=3.12 -y && micromamba activate $v && pip install apples taxtastic
-# pip install weblogo
+#!/usr/bin/env bash
+# Install PiPP dependencies into a conda environment and build the bundled
+# Rust binary. This is a thin wrapper around `environment.yaml` and
+# `cargo build`; you can run those two commands directly if you prefer.
+#
+#   $ ./install.sh                     # use micromamba (default)
+#   $ CONDA=mamba ./install.sh         # or mamba / conda
+#   $ ./install.sh --skip-rust         # don't build pipp_util (e.g. CI without Rust)
+#   $ ./install.sh --skip-env          # don't create the conda env
+
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+CONDA="${CONDA:-micromamba}"
+skip_env=0
+skip_rust=0
+for arg in "$@"; do
+  case "$arg" in
+    --skip-env)  skip_env=1 ;;
+    --skip-rust) skip_rust=1 ;;
+    -h|--help)
+      sed -n '2,10p' "$0" | sed 's/^# \?//'
+      exit 0
+      ;;
+    *)
+      echo "unknown arg: $arg" >&2
+      exit 2
+      ;;
+  esac
+done
+
+if [[ $skip_env -eq 0 ]]; then
+  echo "==> creating conda env from environment.yaml (via $CONDA)"
+  "$CONDA" env create -f environment.yaml
+  env_name="$(awk '/^name:/{print $2; exit}' environment.yaml)"
+  echo
+  echo "Activate the env with:"
+  echo "  $CONDA activate $env_name"
+fi
+
+if [[ $skip_rust -eq 0 ]]; then
+  echo "==> building pipp_util (cargo build --release)"
+  cargo build --release --manifest-path rust/Cargo.toml
+  echo
+  echo "Binary built at: rust/target/release/pipp_util"
+fi
