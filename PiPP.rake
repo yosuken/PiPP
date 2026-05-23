@@ -84,7 +84,7 @@ task :default do
   ### constants from arguments
   Odir         = ENV["outdir"]            ## output directory
   OdirExist    = ENV["outdir_exist"]      ## output directory exist? ("true" or "")
-  Fques        = ENV["query"]             ## query
+  Fque         = ENV["query"]             ## query (single FASTA file)
   Rpkgs        = ENV["refpkg"]            ## refpkg
   Ncpu         = ENV["ncpus"].to_i        ## num of CPUs
   Evalue       = ENV["evalue"].to_f       ## hmmsearch evalue threshold (default: 1e-5)
@@ -106,6 +106,7 @@ task :default do
   EPA_NG_model = ENV["epa_ng_model"]      ## required if --placer epa-ng is given
   Ex_lvs       = ENV["extract_levels"]    ## clade/taxonomy level for 'gappa prepare extract' (default: 0)
   Placer       = ENV["placer"]            ## pplacer|apples-2|epa-ng
+  KeepIntermediate = ENV["keep_intermediate"] == "true"  ## keep prefilter/chunks/batch/log/tasks after run
   Z            = 1_000_000                ## hmmsearch data size for evalue calculation
   # Trim_opt     = ENV["trim_option"]   ## 'merge' (merge regions of hmmserach hits)  or 'largest' (take largest hit) (default: merge)
 
@@ -182,12 +183,11 @@ task :default do
   PreQuedir = "#{Odir}/prefilter/query"     # "#{Odir}/prefilter/query/#{que[:name]}/*.fa" (use .fa extension)
   PreFildir = "#{Odir}/prefilter/hmmsearch" # "#{Odir}/prefilter/hmmsearch/#{que[:name]}/{evalues.tsv,*.domtableout}"
   Cnkdir    = "#{Odir}/chunks"              # "#{Odir}/chunks/#{pkg[:name]}/{chunk,alignment,placement}"
-  Resdir    = "#{Odir}/result"              # "#{Odir}/result/refpkg/#{pkg[:name]}/{all,each}/{query,alignment,placement,assign,extract}/#{que[:name]}"
+  Resdir    = "#{Odir}/result"              # "#{Odir}/result/#{pkg[:name]}/{seq,alignment,placement,assign,extract,graft,feature}"
   Logdir    = "#{Odir}/log/tasks"
 
   ## variables
-  $fques    = []
-  $qnames   = {}
+  $fque     = nil
   $fpkgs    = []
   $rnames   = {}
   $ex_lvs   = []
@@ -211,6 +211,12 @@ task :default do
     Rake::Task[task].invoke(idx)
     # STDOUT.flush
   }
+
+  ### cleanup intermediate dirs (suppress with --keep-intermediate)
+  unless KeepIntermediate
+    puts "\n\e[1;32m===== cleanup intermediate files\e[0m"
+    [Predir, Cnkdir, Jobdir, Logdir].each{ |d| rm_rf d if File.directory?(d) }
+  end
 end
 # }}} default (run all tasks)
 
@@ -225,68 +231,39 @@ task "01-1a-A.validate_query", ["step"] do |t, args|
   script = "#{__dir__}/script/#{t.name}.rb"
 
   ## validate query and make a copy
-  fques = Fques.split(/[,\s]+/).inject([]){ |a, path| a += Dir[path.gsub("~", ENV["HOME"])].sort }
-  fques = fques.map{ |fque|
-    if File.zero?(fque)
-      $stderr.puts "#{Warmsg} #{fque} is empty. Skip it."
-      next nil
-    else
-      File.open(fque){ |fr|
-        if fque =~ /\.gz$/ or fque =~ /\.gzip/
-          is_fque_gz = true
-          require 'zlib'
+  fque = Fque
+  raise("#{Errmsg} <query> file: #{fque} is empty.") if File.zero?(fque)
 
-          Zlib::GzipReader.open(fque) { |fr|
-            l = fr.gets
-            raise("#{Errmsg} <query> file: #{fque} has wrong format.\nThe first line should begin '>'") if l[0] != ">"
-          }
-        else
-          l = fr.gets
-          raise("#{Errmsg} <query> file: #{fque} has wrong format.\nThe first line should begin '>'") if l[0] != ">"
-        end
-      } 
-    end
-    fque ## valid fasta
-  }.compact
+  if fque =~ /\.gz$/ or fque =~ /\.gzip/
+    require 'zlib'
+    Zlib::GzipReader.open(fque) { |fr|
+      l = fr.gets
+      raise("#{Errmsg} <query> file: #{fque} has wrong format.\nThe first line should begin '>'") if l[0] != ">"
+    }
+  else
+    File.open(fque){ |fr|
+      l = fr.gets
+      raise("#{Errmsg} <query> file: #{fque} has wrong format.\nThe first line should begin '>'") if l[0] != ">"
+    }
+  end
 
-  $stderr.puts ["", "", "\e[1;32m===== check query file (N=#{fques.size}) \e[0m"]
-  raise("#{Errmsg} no query file detected.") if fques.size == 0
+  $stderr.puts ["", "", "\e[1;32m===== check query file \e[0m"]
 
-  ### file name duplication check
-  fques.each{ |fque|
-    name = File.basename(fque).gsub(/\.gz/, "").gsub(/\.gzip/, "").split(".")[0..-2]*"."
-    raise("#{Errmsg} file name #{name} is given twice.") if $qnames[name]
-    $qnames[name] = 1
-  }
-
+  ### parse fasta and check sequence length
   mkdir_p PreQuedir
-  flsts  = []
-  fques.each{ |fque|
-    ### parse fasta and check sequence length
-    name = File.basename(fque).gsub(/\.gz/, "").gsub(/\.gzip/, "").split(".")[0..-2]*"."
-    fa   = "#{PreQuedir}/#{name}.fa"
-    fjsn = "#{PreQuedir}/#{name}.json"
-    flst = "#{PreQuedir}/#{name}.list"
-    # flog = "#{PreQuedir}/#{name}.fa.log"
+  name = File.basename(fque).gsub(/\.gz/, "").gsub(/\.gzip/, "").split(".")[0..-2]*"."
+  fa   = "#{PreQuedir}/#{name}.fa"
+  fjsn = "#{PreQuedir}/#{name}.json"
+  flst = "#{PreQuedir}/#{name}.list"
 
-    if !File.exist?(fjsn)
-      outs << "ruby #{script} #{MinSeqLen} #{name} #{fque} #{fa} #{fjsn} #{flst}"
-    end
-
-    flsts  << flst
-  }
+  if !File.exist?(fjsn)
+    outs << "ruby #{script} #{MinSeqLen} #{name} #{fque} #{fa} #{fjsn} #{flst}"
+  end
 
   next if outs.size == 0
 
   WriteBatch.call(t, Jobdir, outs)
   RunBatch.call(t, Jobdir, Ncpu, Logdir)
-
-  ### [!!!] sequence ID might be duplicated between files. Check it.
-  ### [ToDo] could be separate task
-  sh "cat #{flsts*' '} |sort |uniq -d >#{Predir}/duplicated.list"
-  n_dup = IO.readlines("#{Predir}/duplicated.list").size
-
-  puts "#{Warmsg} #{n_dup} non-unique sequence IDs are found between query files. See #{Predir}/duplicated.list" if n_dup > 0
 end
 # }}}
 
@@ -297,15 +274,12 @@ task "01-1a-B.parse_query_info", ["step"] do |t, args|
   PrintStatus.call(args.step, NumStep, "START", t)
   require 'json'
 
-  $fques = []
-  $qnames.each_key{ |name|
-    fjsn = "#{PreQuedir}/#{name}.json"
-    sjsn = IO.readlines(fjsn)[0]
-    puts sjsn ### print info
+  name = File.basename(Fque).gsub(/\.gz/, "").gsub(/\.gzip/, "").split(".")[0..-2]*"."
+  fjsn = "#{PreQuedir}/#{name}.json"
+  sjsn = IO.readlines(fjsn)[0]
+  puts sjsn ### print info
 
-    # $fques << eval(sjsn)
-    $fques << JSON.parse(sjsn, symbolize_names: true)
-  }
+  $fque = JSON.parse(sjsn, symbolize_names: true)
 end
 # }}}
 
@@ -403,17 +377,15 @@ task "01-2a.hmmsearch", ["step"] do |t, args|
   puts "### number of cpu per a hmmsearch: #{ncpu} CPUs (total: #{Ncpu})"
   puts "###"
 
-  p $fques
-  $fques.each{ |que|
-    next if que[:numseq] == 0
-    odir = "#{PreFildir}/#{que[:name]}/out"; mkdir_p odir
-    $fpkgs.each{ |pkg|
-      db   = pkg[:fhmm]
-      fa   = que[:fasta]
-      fout = "#{odir}/#{pkg[:name]}.out"
-      flog = "#{odir}/#{pkg[:name]}.log"
-      outs << "hmmsearch --cpu #{ncpu} -Z #{Z} --notextw -o #{fout} #{db} #{fa} >#{flog} 2>&1"
-    }
+  p $fque
+  raise("#{Errmsg} query #{$fque[:name]} has no sequence.") if $fque[:numseq] == 0
+  odir = "#{PreFildir}/#{$fque[:name]}/out"; mkdir_p odir
+  $fpkgs.each{ |pkg|
+    db   = pkg[:fhmm]
+    fa   = $fque[:fasta]
+    fout = "#{odir}/#{pkg[:name]}.out"
+    flog = "#{odir}/#{pkg[:name]}.log"
+    outs << "hmmsearch --cpu #{ncpu} -Z #{Z} --notextw -o #{fout} #{db} #{fa} >#{flog} 2>&1"
   }
 
   WriteBatch.call(t, Jobdir, outs)
@@ -430,13 +402,12 @@ task "01-2b.parse_hmmsearch", ["step"] do |t, args|
 
   script = "#{__dir__}/script/parse_hmmsearch.rb"
 
-  $fques.each{ |que|
-    fa    = que[:fasta]
-    idir  = "#{PreFildir}/#{que[:name]}/out"
-    next if Dir["#{idir}/*.out"].size == 0
+  fa    = $fque[:fasta]
+  idir  = "#{PreFildir}/#{$fque[:name]}/out"
 
+  if Dir["#{idir}/*.out"].size > 0
     ### concat hmmsearch output files
-    odir = "#{PreFildir}/#{que[:name]}/parsed"; mkdir_p odir unless File.directory?(odir)
+    odir = "#{PreFildir}/#{$fque[:name]}/parsed"; mkdir_p odir unless File.directory?(odir)
     fhmm = "#{odir}/hmmsearch_concat.out"
     open(fhmm, "w"){ |fw|
       $fpkgs.each{ |pkg|
@@ -454,7 +425,7 @@ task "01-2b.parse_hmmsearch", ["step"] do |t, args|
     option  = "-ge #{Evalue} -e #{EvalueDom} --create-evalue-table --min-hmm-len-dom #{MinHmmLenDom} --min-hmm-cov-dom #{MinHmmCovDom} --min-ali-len-dom #{MinAliLenDom} --min-ali-cov-dom #{MinAliCovDom} "
     option += "--min-hmm-len #{MinHmmLen} --min-hmm-cov #{MinHmmCov} --min-ali-len #{MinAliLen} --min-ali-cov #{MinAliCov}"
     outs << "ruby #{script} #{option} -i #{fhmm} -f #{fa} -o #{odir} >#{flog} 2>&1"
-  }
+  end
 
   WriteBatch.call(t, Jobdir, outs)
   RunBatch.call(t, Jobdir, Ncpu, Logdir)
@@ -492,42 +463,40 @@ task "01-2c.split_fasta", ["step"] do |t, args|
   end
   # }}}
 
-  $fques.each{ |que|
-    ### parse parse_hmmsearch.rb output
-    ftsv = "#{PreFildir}/#{que[:name]}/parsed/best-hit.tsv"
-    hmm2regs = {} ### hmm_name => regions
-    hmm2gids = {} ### hmm_name => gene_ids
-    open(ftsv){ |fr|
-      _ = fr.gets # skip header
-      #       0           1             2         3        4         5        6      7     8         9
-      # protein  length(aa)  protein_info  hmm_name  hmm_acc  hmm_desc  hmm_len  score  bias  c-Evalue
-      #       10      11      12      13      14      15      16   17           18          19
-      # i-Evalue  hmm.fm  hmm.to  ali.fm  ali.to  env.fm  env.to  acc  full-Evalue  full-score
-      #   20           21
-      # link  region_name
-      while l = fr.gets
-        a = l.strip.split("\t", -1)
-        gid, hmm, reg = a.values_at(0, 3, 21)
-        hmm2gids[hmm] ||= {}
-        hmm2gids[hmm][gid] = 1
-        hmm2regs[hmm] ||= {}
-        hmm2regs[hmm][reg] = 1
-      end
-    }
+  ### parse parse_hmmsearch.rb output
+  ftsv = "#{PreFildir}/#{$fque[:name]}/parsed/best-hit.tsv"
+  hmm2regs = {} ### hmm_name => regions
+  hmm2gids = {} ### hmm_name => gene_ids
+  open(ftsv){ |fr|
+    _ = fr.gets # skip header
+    #       0           1             2         3        4         5        6      7     8         9
+    # protein  length(aa)  protein_info  hmm_name  hmm_acc  hmm_desc  hmm_len  score  bias  c-Evalue
+    #       10      11      12      13      14      15      16   17           18          19
+    # i-Evalue  hmm.fm  hmm.to  ali.fm  ali.to  env.fm  env.to  acc  full-Evalue  full-score
+    #   20           21
+    # link  region_name
+    while l = fr.gets
+      a = l.strip.split("\t", -1)
+      gid, hmm, reg = a.values_at(0, 3, 21)
+      hmm2gids[hmm] ||= {}
+      hmm2gids[hmm][gid] = 1
+      hmm2regs[hmm] ||= {}
+      hmm2regs[hmm][reg] = 1
+    end
+  }
 
-    $fpkgs.each{ |pkg|
-      regs = hmm2regs[pkg[:hmmname]]
-      gids = hmm2gids[pkg[:hmmname]]
-      next if !regs or regs.keys.size == 0
+  $fpkgs.each{ |pkg|
+    regs = hmm2regs[pkg[:hmmname]]
+    gids = hmm2gids[pkg[:hmmname]]
+    next if !regs or regs.keys.size == 0
 
-      %w|whole region|.zip(%w|best-hit.whole.fa best-hit.fa|, [gids, regs]){ |type, fname, ids|
-        fin  = "#{PreFildir}/#{que[:name]}/parsed/#{fname}"
-        odir = "#{PreFildir}/#{que[:name]}/seq/#{type}/#{pkg[:name]}"; mkdir_p odir unless File.directory?(odir)
-        fout = "#{odir}/#{que[:name]}.fa"
+    %w|whole region|.zip(%w|best-hit.whole.fa best-hit.fa|, [gids, regs]){ |type, fname, ids|
+      fin  = "#{PreFildir}/#{$fque[:name]}/parsed/#{fname}"
+      odir = "#{PreFildir}/#{$fque[:name]}/seq/#{type}/#{pkg[:name]}"; mkdir_p odir unless File.directory?(odir)
+      fout = "#{odir}/#{$fque[:name]}.fa"
 
-        parse_fasta(fin, fout, ids)
-        # p [fin, fout, ids.size]
-      }
+      parse_fasta(fin, fout, ids)
+      # p [fin, fout, ids.size]
     }
   }
 end
@@ -542,24 +511,12 @@ task "01-2d.copy_detected", ["step"] do |t, args|
 
   $fpkgs.each{ |pkg|
     %w|whole region|.each{ |type|
-      ### for each
-      fins = []
-      $fques.each{ |que|
-        fin  = "#{PreFildir}/#{que[:name]}/seq/#{type}/#{pkg[:name]}/#{que[:name]}.fa"
-        next unless File.exist?(fin)
+      fin  = "#{PreFildir}/#{$fque[:name]}/seq/#{type}/#{pkg[:name]}/#{$fque[:name]}.fa"
+      next unless File.exist?(fin)
 
-        odir = "#{Resdir}/#{pkg[:name]}/each/seq/#{type}"; mkdir_p odir unless File.directory?(odir)
-        fout = "#{odir}/#{que[:name]}.fa"
-
-        outs << "cp #{fin} #{fout}"
-        fins << fin
-      }
-
-      ### for all
-      next if fins.size == 0
-      odir = "#{Resdir}/#{pkg[:name]}/all/seq"; mkdir_p odir unless File.directory?(odir)
+      odir = "#{Resdir}/#{pkg[:name]}/seq"; mkdir_p odir unless File.directory?(odir)
       fout = "#{odir}/#{type}.fa"
-      outs << "cat #{fins*' '} >#{fout}"
+      outs << "cp #{fin} #{fout}"
     }
   }
 
@@ -576,7 +533,7 @@ task "01-2e.prepare_for_placement", ["step"] do |t, args|
   ### assign Npara and NcpuP by counting number of refpkgs with queries identified.
   npkg = 0
   $fpkgs.each{ |pkg|
-    fas = "#{PreFildir}/*/seq/region/#{pkg[:name]}/*.fa" ### * --> que[:name]
+    fas = "#{PreFildir}/#{$fque[:name]}/seq/region/#{pkg[:name]}/#{$fque[:name]}.fa"
     next if Dir[fas].size == 0
     npkg += 1
   }
@@ -603,7 +560,7 @@ task "01-3a.chunkify", ["step"] do |t, args|
   cmd  = "gappa prepare chunkify --threads 1 --allow-file-overwriting"
 
   $fpkgs.each{ |pkg|
-    fas = "#{PreFildir}/*/seq/region/#{pkg[:name]}/*.fa" ### * --> que[:name]
+    fas = "#{PreFildir}/#{$fque[:name]}/seq/region/#{pkg[:name]}/#{$fque[:name]}.fa"
     next if Dir[fas].size == 0
 
     ### prepare input fasta file (cat all query files)
@@ -856,34 +813,16 @@ task "01-3d.unchunkify", ["step"] do |t, args|
   (puts "Already done. Skipped." ; next) if File.exist?("#{Logdir}/#{t.name.split(":")[-1]}/exit") ### skip if already done
   outs = []
   cmd1 = "gappa prepare unchunkify --threads 1 --allow-file-overwriting"
-  cmd2 = "gappa edit merge --threads 1 --allow-file-overwriting"
-
-  script = "#{__dir__}/script/merge_jplace.rb"
 
   $fpkgs.each{ |pkg|
-    fplcs = "#{Cnkdir}/#{pkg[:name]}/placement/chunk_*/*.jplace" ## mafft-add.jplace
+    fplcs = "#{Cnkdir}/#{pkg[:name]}/placement/chunk_*/*.jplace"
     next if Dir[fplcs].size == 0
 
     fabus = "#{Cnkdir}/#{pkg[:name]}/chunk/abundances_*.json"
-    odir  = "#{Resdir}/#{pkg[:name]}/each/placement"; mkdir_p odir ## #{Resdir}/refpkg/#{pkg[:name]}/each/placement/*.jplace
+    odir  = "#{Resdir}/#{pkg[:name]}/placement"; mkdir_p odir
     flog  = "#{odir}/unchunkify.log"
 
-    out   = []
-    out  << "#{cmd1} --out-dir #{odir} --abundances-path #{fabus} --jplace-path #{fplcs} >#{flog} 2>&1"
-
-    ### merge the all jplace file
-    odir  = "#{Resdir}/#{pkg[:name]}/all/placement"; mkdir_p odir
-    fall  = "#{odir}/all.jplace"
-    # flog  = "#{odir}/merge.log"
-    # out << "#{cmd2} --out-dir #{odir} --file-prefix all --jplace-path #{Resdir}/#{pkg[:name]}/each/placement/*.jplace >#{flog} 2>&1"
-
-    ### [2025-09-27]
-    ### ruby script (merge_jplace.rb) raised error like below
-    ### /lustre/aptmp/yosuke/usr/micromamba/envs/PiPP_v0.2.0/lib/ruby/3.4.0/json/common.rb:221:in 'JSON::Ext::Parser.parse': unexpected token at '-nan, 0.00655935 ], (JSON::ParserError)
-    out  << "ruby #{script} #{Resdir}/#{pkg[:name]}/each/placement/*.jplace >#{fall}"
-
-
-    outs << out*" && "
+    outs << "#{cmd1} --out-dir #{odir} --abundances-path #{fabus} --jplace-path #{fplcs} >#{flog} 2>&1"
   }
 
   WriteBatch.call(t, Jobdir, outs)
@@ -901,20 +840,16 @@ task "01-3e.unchunkify_alignment", ["step"] do |t, args|
   script = "#{__dir__}/script/#{t.name}.rb"
 
   $fpkgs.each{ |pkg|
-    fas  = "#{Cnkdir}/#{pkg[:name]}/chunk/chunk_*.fasta" ## region seq, hashed 
+    fas  = "#{Cnkdir}/#{pkg[:name]}/chunk/chunk_*.fasta" ## region seq, hashed
     alns = "#{Cnkdir}/#{pkg[:name]}/alignment/chunk_*/#{Aligner}.fa" ## aligned seq, hashed
 
-    ques = $fques.map{ |que| Dir["#{PreFildir}/#{que[:name]}/seq/region/#{pkg[:name]}/#{que[:name]}.fa"] }.flatten ## seq_region, labeled 
+    ques = Dir["#{PreFildir}/#{$fque[:name]}/seq/region/#{pkg[:name]}/#{$fque[:name]}.fa"] ## seq_region, labeled
 
     next if ques.size == 0
 
-    ### write unchunked alignment in #{Resdir}/#{pkg[:name]}/all/alignment/aligned.fa
-    adir = "#{Resdir}/#{pkg[:name]}/all/alignment"; mkdir_p adir unless File.directory?(adir)
+    adir = "#{Resdir}/#{pkg[:name]}/alignment"; mkdir_p adir unless File.directory?(adir)
 
-    ### write unchunked alignment in #{Resdir}/#{pkg[:name]}/each/alignment/#{que[:name]}/aligned.fa
-    bdir = "#{Resdir}/#{pkg[:name]}/each/alignment"; mkdir_p bdir unless File.directory?(bdir)
-
-    outs << "ruby #{script} #{pkg[:faln]} '#{fas}' '#{alns}' '#{ques*","}' #{adir} #{bdir}"
+    outs << "ruby #{script} #{pkg[:faln]} '#{fas}' '#{alns}' '#{ques*","}' #{adir}"
   }
 
   WriteBatch.call(t, Jobdir, outs)
@@ -931,25 +866,12 @@ task "01-4a.info", ["step"] do |t, args|
   cmd  = "gappa examine info --threads 1 --allow-file-overwriting"
 
   $fpkgs.each{ |pkg|
-    bdir = "#{Resdir}/#{pkg[:name]}"
+    bdir  = "#{Resdir}/#{pkg[:name]}"
+    fplcs = Dir["#{bdir}/placement/*.jplace"][0]
+    next unless fplcs
 
-    ### all (merged) query files
-    fplcs = "#{bdir}/all/placement/all.jplace" ## "#{que[:name]}.jplace"
-    next if Dir[fplcs].size == 0
-
-    odir  = "#{bdir}/all/placement"; mkdir_p odir
-    flog  = "#{odir}/all.info"
+    flog  = "#{bdir}/placement/info.log"
     outs << "#{cmd} --jplace-path #{fplcs} >#{flog} 2>&1"
-
-    ### each query file
-    $fques.each{ |que|
-      fplcs = "#{bdir}/each/placement/#{que[:name]}.jplace" ## "#{que[:name]}.jplace"
-      next unless File.exist?(fplcs)
-
-      odir  = "#{bdir}/each/placement"
-      flog  = "#{odir}/#{que[:name]}.info"
-      outs << "#{cmd} --jplace-path #{fplcs} >#{flog} 2>&1"
-    }
   }
 
   WriteBatch.call(t, Jobdir, outs)
@@ -966,28 +888,13 @@ task "01-4b.lwr-list", ["step"] do |t, args|
   cmd  = "gappa examine lwr-list --threads 1 --allow-file-overwriting"
 
   $fpkgs.each{ |pkg|
-    bdir = "#{Resdir}/#{pkg[:name]}"
+    bdir  = "#{Resdir}/#{pkg[:name]}"
+    fplcs = Dir["#{bdir}/placement/*.jplace"][0]
+    next unless fplcs
 
-    ### all (merged) query files
-    fplcs = "#{bdir}/all/placement/all.jplace"
-    # fplcs = "#{bdir}/each/placement/*.jplace" ## "#{que[:name]}.jplace"
-    next if Dir[fplcs].size == 0
-
-    odir  = "#{bdir}/all/placement"; mkdir_p odir
-    flog  = "#{odir}/all.lwr-list.log"
-    pref  = "all."
-    outs << "#{cmd} --out-dir #{odir} --file-prefix #{pref} --jplace-path #{fplcs} >#{flog} 2>&1"
-
-    ### each query file
-    $fques.each{ |que|
-      fplcs = "#{bdir}/each/placement/#{que[:name]}.jplace" ## "#{que[:name]}.jplace"
-      next unless File.exist?(fplcs)
-
-      odir  = "#{bdir}/each/placement"
-      flog  = "#{odir}/#{que[:name]}.lwr-list.log"
-      pref  = "#{que[:name]}."
-      outs << "#{cmd} --out-dir #{odir} --file-prefix #{pref} --jplace-path #{fplcs} >#{flog} 2>&1"
-    }
+    odir  = "#{bdir}/placement"
+    flog  = "#{odir}/lwr-list.log"
+    outs << "#{cmd} --out-dir #{odir} --jplace-path #{fplcs} >#{flog} 2>&1"
   }
 
   WriteBatch.call(t, Jobdir, outs)
@@ -1010,28 +917,14 @@ task "01-4c.edpl", ["step"] do |t, args|
   next ## SKIP THIS TASK !!!
 
   $fpkgs.each{ |pkg|
-    bdir = "#{Resdir}/#{pkg[:name]}"
+    bdir  = "#{Resdir}/#{pkg[:name]}"
+    fplcs = Dir["#{bdir}/placement/*.jplace"][0]
+    next unless fplcs
 
-    ### all query files
-    fplcs = "#{bdir}/all/placement/all.jplace"
-    # fplcs = "#{bdir}/each/placement/*.jplace" ## "#{que[:name]}.jplace"
-    next if Dir[fplcs].size == 0
-
-    odir  = "#{bdir}/all/placement"; mkdir_p odir
-    flog  = "#{odir}/all.edpl.log"
-    pref  = "all.edpl_"
+    odir  = "#{bdir}/placement"
+    flog  = "#{odir}/edpl.log"
+    pref  = "edpl_"
     outs << "#{cmd} --out-dir #{odir} --file-prefix #{pref} --jplace-path #{fplcs} >#{flog} 2>&1"
-
-    ### each query file
-    $fques.each{ |que|
-      fplcs = "#{bdir}/each/placement/#{que[:name]}.jplace" ## "#{que[:name]}.jplace"
-      next unless File.exist?(fplcs)
-
-      odir  = "#{bdir}/each/placement"
-      flog  = "#{odir}/#{que[:name]}.edpl.log"
-      pref  = "#{que[:name]}.edpl_"
-      outs << "#{cmd} --out-dir #{odir} --file-prefix #{pref} --jplace-path #{fplcs} >#{flog} 2>&1"
-    }
   }
 
   WriteBatch.call(t, Jobdir, outs)
@@ -1055,26 +948,12 @@ task "01-4d.assign", ["step"] do |t, args|
 
     ($stderr.puts "For #{pkg}, taxon.tsv is not found. Skip the taxonomy/clade assignment step."; next) unless ftax
 
-    ### all query files
-    fplcs = "#{bdir}/all/placement/all.jplace"
-    # fplcs = "#{bdir}/each/placement/*.jplace" ## "#{que[:name]}.jplace"
-    next if Dir[fplcs].size == 0
+    fplcs = Dir["#{bdir}/placement/*.jplace"][0]
+    next unless fplcs
 
-    odir  = "#{bdir}/all/assign"; mkdir_p odir
+    odir  = "#{bdir}/assign"; mkdir_p odir
     flog  = "#{odir}/assign.log"
-    fpque = "#{odir}/per_query.tsv" ### --per-query-results output
     outs << "#{cmd} --out-dir #{odir} --jplace-path #{fplcs} --taxon-file #{ftax} --per-query-results >#{flog} 2>&1"
-
-    ### each query file
-    $fques.each{ |que|
-      fplcs = "#{bdir}/each/placement/#{que[:name]}.jplace" ## "#{que[:name]}.jplace"
-      next unless File.exist?(fplcs)
-
-      odir  = "#{bdir}/each/assign/#{que[:name]}"; mkdir_p odir
-      flog  = "#{odir}/assign.log"
-      fpque = "#{odir}/per_query.tsv"
-      outs << "#{cmd} --out-dir #{odir} --jplace-path #{fplcs} --taxon-file #{ftax} --per-query-results >#{flog} 2>&1"
-    }
   }
 
   WriteBatch.call(t, Jobdir, outs)
@@ -1106,16 +985,13 @@ task "01-4e.extract", ["step"] do |t, args|
     else $ex_lvs.select{ |i| i <= max_lv }
     end
 
-    lvs.each{ |lv|
-      ### all query files
-      fplcs = "#{bdir}/all/placement/all.jplace"
-      # fplcs = "#{bdir}/each/placement/*.jplace" ## "#{que[:name]}.jplace"
-      next if Dir[fplcs].size == 0
+    fplcs = Dir["#{bdir}/placement/*.jplace"][0]
+    next unless fplcs
 
-      fas   = "#{bdir}/all/query/full_length.fa"
-      odir  = "#{bdir}/all/extract/level#{lv}"; mkdir_p odir
+    lvs.each{ |lv|
+      fas   = "#{bdir}/seq/whole.fa"
+      odir  = "#{bdir}/extract/level#{lv}"; mkdir_p odir
       flog  = "#{odir}/extract.log"
-      fsvg  = "#{odir}/color_tree.svg"
 
       fcld  = "#{odir}/clade.tsv"
       open(fcld, "w"){ |fw|
@@ -1123,19 +999,6 @@ task "01-4e.extract", ["step"] do |t, args|
       }
 
       outs << "#{cmd} --samples-out-dir #{odir} --sequences-out-dir #{odir} --jplace-path #{fplcs} --fasta-path #{fas} --clade-list-file #{fcld} >#{flog} 2>&1"
-
-      ### each query file
-      $fques.each{ |que|
-        fplcs = "#{bdir}/each/placement/#{que[:name]}.jplace" ## "#{que[:name]}.jplace"
-        next unless File.exist?(fplcs)
-
-        fas   = "#{bdir}/each/query/full_length/#{que[:name]}.fa"
-        odir  = "#{bdir}/each/extract/#{que[:name]}"; mkdir_p odir
-        flog  = "#{odir}/extract.log"
-        fsvg  = "#{odir}/color_tree.svg"
-        fcld  = "#{bdir}/all/extract/level#{lv}/clade.tsv" ## written above
-        outs << "#{cmd} --samples-out-dir #{odir} --sequences-out-dir #{odir} --jplace-path #{fplcs} --fasta-path #{fas} --clade-list-file #{fcld} >#{flog} 2>&1"
-      }
     }
   }
 
@@ -1153,26 +1016,13 @@ task "01-4f.graft", ["step"] do |t, args|
   cmd  = "gappa examine graft --threads 1 --fully-resolve --name-prefix Q_ --allow-file-overwriting"
 
   $fpkgs.each{ |pkg|
-    bdir = "#{Resdir}/#{pkg[:name]}"
+    bdir  = "#{Resdir}/#{pkg[:name]}"
+    fplcs = Dir["#{bdir}/placement/*.jplace"][0]
+    next unless fplcs
 
-    ### all query files
-    fplcs = "#{bdir}/all/placement/all.jplace"
-    # fplcs = "#{bdir}/each/placement/*.jplace" ## "#{que[:name]}.jplace"
-    next if Dir[fplcs].size == 0
-
-    odir  = "#{bdir}/all/graft"; mkdir_p odir
+    odir  = "#{bdir}/graft"; mkdir_p odir
     flog  = "#{odir}/graft.log"
     outs << "#{cmd} --out-dir #{odir} --jplace-path #{fplcs} >#{flog} 2>&1"
-
-    ### each query file
-    $fques.each{ |que|
-      fplcs = "#{bdir}/each/placement/#{que[:name]}.jplace" ## "#{que[:name]}.jplace"
-      next unless File.exist?(fplcs)
-
-      odir  = "#{bdir}/each/graft/#{que[:name]}"; mkdir_p odir
-      flog  = "#{odir}/graft.log"
-      outs << "#{cmd} --out-dir #{odir} --jplace-path #{fplcs} >#{flog} 2>&1"
-    }
   }
 
   WriteBatch.call(t, Jobdir, outs)
@@ -1193,26 +1043,13 @@ task "01-4g.heat-tree", ["step"] do |t, args|
   script = "#{__dir__}/script/nexus2itol.rb"
 
   $fpkgs.each{ |pkg|
-    bdir = "#{Resdir}/#{pkg[:name]}"
+    bdir  = "#{Resdir}/#{pkg[:name]}"
+    fplcs = Dir["#{bdir}/placement/*.jplace"][0]
+    next unless fplcs
 
-    ### all query files
-    fplcs = "#{bdir}/all/placement/all.jplace"
-    # fplcs = "#{bdir}/each/placement/*.jplace" ## "#{que[:name]}.jplace"
-    next if Dir[fplcs].size == 0
-
-    odir  = "#{bdir}/all/heat-tree"; mkdir_p odir
+    odir  = "#{bdir}/heat-tree"; mkdir_p odir
     flog  = "#{odir}/heat-tree.log"
     outs << "#{cmd} --out-dir #{odir} --jplace-path #{fplcs} >#{flog} 2>&1 && ruby #{script} #{odir}/#{prefix}.nexus #{odir}/#{prefix}.itol.txt"
-
-    ### each query file
-    $fques.each{ |que|
-      fplcs = "#{bdir}/each/placement/#{que[:name]}.jplace" ## "#{que[:name]}.jplace"
-      next unless File.exist?(fplcs)
-
-      odir  = "#{bdir}/each/heat-tree/#{que[:name]}"; mkdir_p odir
-      flog  = "#{odir}/heat-tree.log"
-      outs << "#{cmd} --out-dir #{odir} --jplace-path #{fplcs} >#{flog} 2>&1 && ruby #{script} #{odir}/#{prefix}.nexus #{odir}/#{prefix}.itol.txt"
-    }
   }
 
   WriteBatch.call(t, Jobdir, outs)
@@ -1236,28 +1073,14 @@ task "01-4h.aligned_position", ["step"] do |t, args|
 
     ($stderr.puts "For #{pkg}, position.tsv is not found. Skip to check alignment positions."; next) unless fpos
 
-    ### all query files
-    fplcs = "#{bdir}/all/placement/all.jplace"
-    # fplcs = "#{bdir}/each/placement/*.jplace" ## "#{que[:name]}.jplace"
-    next if Dir[fplcs].size == 0
+    fplcs = Dir["#{bdir}/placement/*.jplace"][0]
+    next unless fplcs
 
-    odir    = "#{bdir}/all/alignment"
+    odir    = "#{bdir}/alignment"
     fallaln = "#{odir}/aligned.fa" ## should exist.
-    fasn    = "#{bdir}/all/assign/per_query.tsv" ## use result of assignment. If not exist, do not use assignment result
+    fasn    = "#{bdir}/assign/per_query.tsv" ## use result of assignment. If not exist, do not use assignment result
     flog    = "#{odir}/aligned_position.log"
     outs << "ruby #{script} #{odir} #{fpos} #{fallaln} #{frefaln} #{fasn} >#{flog} 2>&1"
-
-    ### each query file
-    $fques.each{ |que|
-      fplcs = "#{bdir}/each/placement/#{que[:name]}.jplace" ## "#{que[:name]}.jplace"
-      next unless File.exist?(fplcs)
-
-      odir    = "#{bdir}/each/alignment/#{que[:name]}"
-      fallaln = "#{odir}/aligned.fa"                ## should exist.
-      fasn    = "#{bdir}/each/assign/#{que[:name]}/per_query.tsv" ## use result of assignment. If not exist, do not use assignment result
-      flog    = "#{odir}/aligned_position.log"
-      outs << "ruby #{script} #{odir} #{fpos} #{fallaln} #{frefaln} #{fasn} >#{flog} 2>&1"
-    }
   }
 
   WriteBatch.call(t, Jobdir, outs)
@@ -1276,11 +1099,10 @@ task "01-5a.krd", ["step"] do |t, args|
   $fpkgs.each{ |pkg|
     bdir = "#{Resdir}/#{pkg[:name]}"
 
-    ### all query files
-    fplcs = "#{bdir}/each/placement/*.jplace" ## "#{que[:name]}.jplace"
+    fplcs = "#{bdir}/placement/*.jplace"
     next if Dir[fplcs].size < 2
 
-    odir  = "#{bdir}/all/krd"; mkdir_p odir
+    odir  = "#{bdir}/krd"; mkdir_p odir
     flog  = "#{odir}/krd.log"
     outs << "#{cmd} --out-dir #{odir} --jplace-path #{fplcs} >#{flog} 2>&1"
   }
@@ -1302,11 +1124,10 @@ task "01-5b.edgepca", ["step"] do |t, args|
   $fpkgs.each{ |pkg|
     bdir = "#{Resdir}/#{pkg[:name]}"
 
-    ### all query files
-    fplcs = "#{bdir}/each/placement/*.jplace" ## "#{que[:name]}.jplace"
+    fplcs = "#{bdir}/placement/*.jplace"
     next if Dir[fplcs].size < 2
 
-    odir  = "#{bdir}/all/edgepca"; mkdir_p odir
+    odir  = "#{bdir}/edgepca"; mkdir_p odir
     flog  = "#{odir}/edgepca.log"
     outs << "#{cmd} --out-dir #{odir} --jplace-path #{fplcs} >#{flog} 2>&1"
   }
@@ -1329,11 +1150,10 @@ task "01-5c.squash", ["step"] do |t, args|
   $fpkgs.each{ |pkg|
     bdir = "#{Resdir}/#{pkg[:name]}"
 
-    ### all query files
-    fplcs = "#{bdir}/each/placement/*.jplace" ## "#{que[:name]}.jplace"
+    fplcs = "#{bdir}/placement/*.jplace"
     next if Dir[fplcs].size < 2
 
-    odir  = "#{bdir}/all/squash"; mkdir_p odir
+    odir  = "#{bdir}/squash"; mkdir_p odir
     flog  = "#{odir}/squash.log"
     outs << "#{cmd} --out-dir #{odir} --jplace-path #{fplcs} >#{flog} 2>&1"
   }
@@ -1355,11 +1175,10 @@ task "01-5d.dispersion", ["step"] do |t, args|
   $fpkgs.each{ |pkg|
     bdir = "#{Resdir}/#{pkg[:name]}"
 
-    ### all query files
-    fplcs = "#{bdir}/each/placement/*.jplace" ## "#{que[:name]}.jplace"
+    fplcs = "#{bdir}/placement/*.jplace"
     next if Dir[fplcs].size < 2
 
-    odir  = "#{bdir}/all/dispersion"; mkdir_p odir
+    odir  = "#{bdir}/dispersion"; mkdir_p odir
     flog  = "#{odir}/dispersion.log"
     outs << "#{cmd} --out-dir #{odir} --mass-norm absolute --jplace-path #{fplcs} >#{flog} 2>&1"
   }
@@ -1380,27 +1199,13 @@ task "01-6a.aa_feature", ["step"] do |t, args|
 
   $fpkgs.each{ |pkg|
     bdir = "#{Resdir}/#{pkg[:name]}"
-    fas  = []
+    fa = "#{PreFildir}/#{$fque[:name]}/seq/region/#{pkg[:name]}/#{$fque[:name]}.fa"
+    next unless File.exist?(fa)
 
-    ### each query file
-    $fques.each{ |que|
-      fa = "#{PreFildir}/#{que[:name]}/seq/region/#{pkg[:name]}/#{que[:name]}.fa"
-      next unless File.exist?(fa)
-
-      odir  = "#{bdir}/each/feature/aa"; mkdir_p odir unless File.directory?(odir)
-      fout  = "#{odir}/#{que[:name]}.tsv"
-      flog  = "#{odir}/#{que[:name]}.log"
-      outs << "ruby #{script} #{fout} #{fa} >#{flog} 2>&1"
-      fas  << fa
-    }
-
-    ### all query files
-    next if fas.size == 0
-
-    odir  = "#{bdir}/all/feature/aa"; mkdir_p odir
-    fout  = "#{odir}/all.tsv"
-    flog  = "#{odir}/all.log"
-    outs << "ruby #{script} #{fout} #{fas*" "} >#{flog} 2>&1"
+    odir  = "#{bdir}/feature/aa"; mkdir_p odir unless File.directory?(odir)
+    fout  = "#{odir}/feature.tsv"
+    flog  = "#{odir}/feature.log"
+    outs << "ruby #{script} #{fout} #{fa} >#{flog} 2>&1"
   }
 
   WriteBatch.call(t, Jobdir, outs)

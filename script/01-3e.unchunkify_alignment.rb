@@ -1,16 +1,14 @@
 
 STDOUT.sync = true; STDERR.sync = true
 
-fori, fas, alns, ques, adir, bdir = ARGV
-
-require 'rake'
+fori, fas, alns, ques, adir = ARGV
 
 ## fori: alignment given by refpkg
 ### fas  = "#{Cnkdir}/#{pkg[:name]}/chunk/chunk_*.fasta"
 fas  =  Dir[fas].sort_by{ |fa| fa.split("/")[-1].split(".")[0].gsub(/^chunk_/, "").to_i }
 ### alns = "#{Cnkdir}/#{pkg[:name]}/alignment/chunk_*/#{Aligner}.fa"
 alns = Dir[alns].sort_by{ |fa| fa.split("/")[-2].gsub(/^chunk_/, "").to_i }
-### ques = "#{Resdir}/filtered/#{que[:name]/seq/region/#{pkg[:name]}.fa", ordered same as input query file.
+### ques = "#{PreFildir}/#{$fque[:name]}/seq/region/#{pkg[:name]}/#{$fque[:name]}.fa"
 ques = ques.split(",")
 
 hash2seq = {}
@@ -39,31 +37,19 @@ IO.read(fori).split(/^>/)[1..-1].each{ |ent|
   header << ">#{lab}" << seq
 }
 
-fwa0 = open("#{adir}/aligned.fa", "w")        ## all alignment with ref
-fwa1 = open("#{adir}/aligned_wo_ref.fa", "w") ## all alignment without ref
+fwa0 = open("#{adir}/aligned.fa", "w")        ## alignment with ref
+fwa1 = open("#{adir}/aligned_wo_ref.fa", "w") ## alignment without ref
 fwa0.puts header
 
 ques.each{ |fa| ## region seq, labeled
-  # fa: #{PreFildir}/#{que[:name]}/seq/region/#{pkg[:name]}/#{que[:name]}.fa
-  name = fa.split("/")[-1].gsub(/\.fa$/, "")
-  odir = "#{bdir}/#{name}"; mkdir_p odir
-  
-  fw0 = open("#{odir}/aligned.fa", "w")        ## each alignment with ref
-  fw1 = open("#{odir}/aligned_wo_ref.fa", "w") ## each alignment without ref
-  fw0.puts header
-
   IO.read(fa).split(/^>/)[1..-1].each{ |ent|
     lab, *seq = ent.split("\n")
     seq = seq.join.gsub(/\s+/, "")
     aln = seq2aln[seq]
 
-    fw0.puts [">"+lab, aln]
-    fw1.puts [">"+lab, aln]
     fwa0.puts [">"+lab, aln]
     fwa1.puts [">"+lab, aln]
   }
-
-  [fw0, fw1].each{ |fw| fw.close }
 }
 
 [fwa0, fwa1].each{ |fwa| fwa.close }

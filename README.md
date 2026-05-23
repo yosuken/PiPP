@@ -5,7 +5,7 @@
 [![size](https://img.shields.io/github/size/webcaetano/craft/build/phaser-craft.min.js.svg)]()
 
 ## currently PiPP is beta version. Any specification might be changed in a future version.
-PiPP is developed as a tool for phylogenetic placement onto a clade or taxonomy defined phylogenetic tree through procedures below. Very large queries are acceptable.
+PiPP is developed as a tool for phylogenetic placement onto a clade or taxonomy defined phylogenetic tree through procedures below. A large query file is acceptable.
 
 ## install (use conda environment)
 
@@ -37,7 +37,7 @@ PiPP is developed as a tool for phylogenetic placement onto a clade or taxonomy 
   c. extract placed sequences and placement file for each clade/taxonomy ('gappa prepare extract')
 
 [usage]
-$ PiPP [options] -q <query fasta(s)> -r <refpkg dir(s)> -o <output dir>
+$ PiPP [options] -q <query fasta> -r <refpkg dir(s)> -o <output dir>
 
 [dependencies]
 - ruby (ver >= 2.0)
@@ -48,14 +48,15 @@ $ PiPP [options] -q <query fasta(s)> -r <refpkg dir(s)> -o <output dir>
 - witch-ng (ver >= 0.0.4)
 
 [output files]
-  result/<refpkg name>/{all,each}/{seq,alignment,placement,assign,extract,...} -- result of placement and further analysis
+  result/<refpkg name>/{seq,alignment,placement,assign,graft,feature,...} -- result of placement and further analysis
 
 [options]
 [File/directory]
-    -q, --query FILE(S)              Query sequence file(s) (protein fasta, can be gzipped) [required]
+    -q, --query FILE                 Query sequence file (protein fasta, can be gzipped) [required]
     -r, --refpkg DIR(S)              Reference package(s) made by taxtastic [required]
     -o, --outdir PATH                Output directory [required]
         --[no-]overwrite             Overwrite output directory (default: overwrite)
+        --keep-intermediate          Keep intermediate files (prefilter/, chunks/, batch/, log/tasks/) after run (default: removed)
 
 [Task]
         --only-detect                Only detect homologous regions of input sequences using hmmsearch
@@ -93,6 +94,12 @@ $ PiPP [options] -q <query fasta(s)> -r <refpkg dir(s)> -o <output dir>
     -h, --help                       Show this help message
     -v, --version                    Show version
 ```
+
+## migration note (v0.3.x → v0.4.0)
+
+- `-q` now accepts a single query FASTA only. Glob patterns and comma-separated lists are no longer supported.
+- Output directory layout has been flattened: `result/<refpkg>/<task>/` (no more `all/`, `each/`, or per-query subdirectories).
+- Intermediate directories (`prefilter/`, `chunks/`, `batch/`, `log/tasks/`) are removed by default after a successful run. Pass `--keep-intermediate` to retain them (useful for debugging or resuming a failed run).
 
 ## citation
 ```

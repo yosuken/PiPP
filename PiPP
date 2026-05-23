@@ -31,6 +31,7 @@ class PiPP
       # Optional flags
       overwrite: false,
       only_detect: false,
+      keep_intermediate: false,
       
       # Prefilter options
       evalue:       1e-5,
@@ -92,7 +93,7 @@ class PiPP
       c. extract placed sequences and placement file for each clade/taxonomy ('gappa prepare extract')
     
     \e[1;32m[usage]\e[0m
-    $ #{@progname} [options] -q <query fasta(s)> -r <refpkg dir(s)> -o <output dir>
+    $ #{@progname} [options] -q <query fasta> -r <refpkg dir(s)> -o <output dir>
     
     \e[1;32m[dependencies]\e[0m
     - ruby (ver >= 2.0) 
@@ -103,7 +104,7 @@ class PiPP
     - witch-ng (ver >= 0.0.4)
     
     \e[1;32m[output files]\e[0m
-      result/<refpkg name>/{all,each}/{seq,alignment,placement,assign,extract,...} -- result of placement and further analysis
+      result/<refpkg name>/{seq,alignment,placement,assign,graft,feature,...} -- result of placement and further analysis
 
     \e[1;32m[options]\e[0m
     EOF
@@ -117,7 +118,7 @@ class PiPP
       
       # {{{ File/directory options
       opts.on("[File/directory]")
-      opts.on("-q", "--query FILE(S)", "Query sequence file(s) (protein fasta, can be gzipped) [required]") do |v|
+      opts.on("-q", "--query FILE", "Query sequence file (protein fasta, can be gzipped) [required]") do |v|
         @options[:query] = v
       end
       
@@ -131,6 +132,10 @@ class PiPP
       
       opts.on("--[no-]overwrite", "Overwrite output directory (default: overwrite)") do
         @options[:overwrite] = true
+      end
+
+      opts.on("--keep-intermediate", "Keep intermediate files (prefilter/, chunks/, batch/, log/tasks/) after run (default: removed)") do
+        @options[:keep_intermediate] = true
       end
       # }}}
       
@@ -270,7 +275,6 @@ class PiPP
     # Handle remaining arguments
     unless ARGV.empty?
       $stderr.puts %|#{ERRMSG} unparsable argument (#{ARGV.first}).|
-      $stderr.puts %|        Note: do not forget quotation marks to use wildcards, like `-q "query_1 query_2"` or `-q 'query_*'`|
       exit 1
     end
   end
@@ -280,7 +284,13 @@ class PiPP
   def validate_options
     # Check required options
     unless @options[:query]
-      $stderr.puts "#{ERRMSG}  -q, --query <fasta file(s)> should be given."
+      $stderr.puts "#{ERRMSG}  -q, --query <fasta file> should be given."
+      $stderr.puts "         execute '#{@progname} -h' for usage"
+      exit 1
+    end
+
+    unless File.file?(@options[:query])
+      $stderr.puts "#{ERRMSG}  -q, --query #{@options[:query]} does not exist or is not a regular file."
       $stderr.puts "         execute '#{@progname} -h' for usage"
       exit 1
     end
@@ -423,7 +433,8 @@ class PiPP
       "extract_levels" => @options[:extract_levels],
       "chunk_size"     => @options[:chunk_size].to_s,
       "ncpus"          => @options[:ncpus].to_s,
-      "only_detect"    => @options[:only_detect] ? "true" : ""
+      "only_detect"       => @options[:only_detect] ? "true" : "",
+      "keep_intermediate" => @options[:keep_intermediate] ? "true" : ""
       # "trim_option"    => @options[:trim_option],
     }
     

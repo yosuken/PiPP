@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-PiPP (Pipeline for Phylogenetic Placement) is a Ruby-based bioinformatics tool for phylogenetic placement of query sequences onto reference phylogenetic trees. The pipeline handles large-scale queries through a multi-step workflow involving sequence prefiltering, alignment, and phylogenetic placement analysis.
+PiPP (Pipeline for Phylogenetic Placement) is a Ruby-based bioinformatics tool for phylogenetic placement of query sequences onto reference phylogenetic trees. The pipeline accepts a single (large) query FASTA file and runs it through a multi-step workflow involving sequence prefiltering, alignment, and phylogenetic placement analysis.
 
 ## Build and Test Commands
 
@@ -21,7 +21,7 @@ rake
 ./PiPP -q <query_fasta> -r <refpkg_dir> -o <output_dir>
 
 # Example with options
-./PiPP -q "queries/*.fa" -r "refpkgs/*" -o results --ncpus 4 --evalue 1e-10
+./PiPP -q queries/sample.fa -r "refpkgs/*" -o results --ncpus 4 --evalue 1e-10
 ```
 
 ### Development Commands
@@ -70,7 +70,8 @@ External tools required:
 
 - `script/`: Ruby processing utilities
 - `test/`: Minitest-based test suite
-- Output structure: `result/<refpkg>/{all,each}/{query,alignment,placement,assign,extract}/`
+- Output structure: `result/<refpkg>/{seq,alignment,placement,assign,graft,feature,...}/`
+- Intermediate dirs (`prefilter/`, `chunks/`, `batch/`, `log/tasks/`) are removed at end of run unless `--keep-intermediate` is passed
 
 ### Configuration
 
