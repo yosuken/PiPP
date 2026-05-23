@@ -21,5 +21,8 @@
 ### binary of witch-ng
 /bin/witch-ng
 
+### Rust build artifacts
+/rust/target/
+
 /.filenum/
 /.ruby-lsp/

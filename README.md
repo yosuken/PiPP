@@ -7,19 +7,35 @@
 ## currently PiPP is beta version. Any specification might be changed in a future version.
 PiPP is developed as a tool for phylogenetic placement onto a clade or taxonomy defined phylogenetic tree through procedures below. A large query file is acceptable.
 
-## install (use conda environment)
+## install
 
-### [1] make conda environment and install packages
+### [1] dependencies
+
+Use the bundled `environment.yaml` to create a conda env with all required tools and a Rust toolchain:
+
 ```
-$ conda create -n PiPP -y && conda activate PiPP
+### replace 'micromamba' with 'mamba' or 'conda' if you use either
+$ micromamba env create -f environment.yaml
+$ micromamba activate PiPP_v0.4.0
 ```
 
-### [2] install packages
+### [2] build `pipp_util` (bundled Rust binary)
+
+`pipp_util` ingests the per-refpkg TSV outputs into a DuckDB file at the end of the pipeline.
+
 ```
-### create environment (name: PiPP_v0.3.0) and install packages
-### change 'micromamba' to 'mamba' or 'conda' if you use mamba or conda instead of micromamba
-$ v=PiPP_v0.3.0 && micromamba create -n $v -c conda-forge -c bioconda ruby=3.4.5 hmmer=3.4 parallel=20250822 gappa=0.9.0 pplacer=1.1.alpha19 mafft=7.520 fasttree=2.2.0 epa-ng=0.3.8 python=3.12 -y && micromamba activate $v && pip install apples taxtastic
+$ cargo build --release --manifest-path rust/Cargo.toml
 ```
+
+The pipeline locates the binary in this order:
+
+1. `$PIPP_UTIL_BIN` if set and executable
+2. `pipp_util` found on `$PATH` (e.g. via Bioconda)
+3. `rust/target/release/pipp_util` (after the `cargo build` above)
+
+### [3] (future) Bioconda
+
+A `meta.yaml` recipe is included in the repo as a skeleton for a future Bioconda package. The plan is for `pipp` to install both the Ruby orchestration and the Rust `pipp_util` binary in one shot.
 
 ## usage 
 ```
@@ -49,6 +65,7 @@ $ PiPP [options] -q <query fasta> -r <refpkg dir(s)> -o <output dir>
 
 [output files]
   result/<refpkg name>/{seq,alignment,placement,assign,graft,feature,...} -- result of placement and further analysis
+  result/<refpkg name>/pipp.duckdb -- DuckDB file with assignments / aa_features / aligned_positions tables (produced by pipp_util)
 
 [options]
 [File/directory]
@@ -95,11 +112,38 @@ $ PiPP [options] -q <query fasta> -r <refpkg dir(s)> -o <output dir>
     -v, --version                    Show version
 ```
 
+## DuckDB output
+
+At the end of a run, `pipp_util import` loads three TSVs from each `result/<refpkg>/` into `result/<refpkg>/pipp.duckdb`:
+
+| table              | source TSV                              | grain                                |
+|--------------------|------------------------------------------|--------------------------------------|
+| `assignments`      | `assign/per_query.tsv`                   | one row per (query, taxopath)        |
+| `aa_features`      | `feature/aa/feature.tsv`                 | one row per query                    |
+| `aligned_positions`| `alignment/aligned_position.tsv`         | one row per (query, position_label)  |
+
+`aligned_positions` is stored in long format: the dynamic per-position columns from the TSV (driven by the refpkg's `position.tsv`) become rows keyed by `pos_label`.
+
+Each table has a `refpkg` column so multiple DBs can be `ATTACH`-ed and unioned. Quick examples:
+
+```
+$ duckdb result/opsin/pipp.duckdb -c "SELECT taxopath, COUNT(*) FROM assignments GROUP BY 1 ORDER BY 2 DESC LIMIT 10"
+$ duckdb result/opsin/pipp.duckdb -c "SELECT * FROM aligned_positions WHERE pos_label='Lys296' AND residues LIKE 'K%'"
+```
+
+Standalone usage:
+
+```
+$ pipp_util import result/opsin/         # writes result/opsin/pipp.duckdb
+$ pipp_util import result/opsin/ --db custom.duckdb --refpkg opsin --overwrite
+```
+
 ## migration note (v0.3.x → v0.4.0)
 
 - `-q` now accepts a single query FASTA only. Glob patterns and comma-separated lists are no longer supported.
 - Output directory layout has been flattened: `result/<refpkg>/<task>/` (no more `all/`, `each/`, or per-query subdirectories).
 - Intermediate directories (`prefilter/`, `chunks/`, `batch/`, `log/tasks/`) are removed by default after a successful run. Pass `--keep-intermediate` to retain them (useful for debugging or resuming a failed run).
+- New `01-7a.duckdb_import` task produces `result/<refpkg>/pipp.duckdb` from the per-task TSVs. Requires the bundled Rust binary `pipp_util` (see install section).
 
 ## citation
 ```

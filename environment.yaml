@@ -1,0 +1,20 @@
+name: PiPP_v0.4.0
+channels:
+  - bioconda
+  - conda-forge
+dependencies:
+  - ruby >=2.7
+  - hmmer >=3.0
+  - mafft >=7.453
+  - gappa >=0.6
+  - pplacer >=1.1.alpha19
+  - parallel
+  - fasttree
+  - epa-ng
+  - python >=3.10
+  - duckdb >=1.0    # CLI; pipp_util bundles its own DuckDB via duckdb-rs
+  - rust            # required to build pipp_util from source (skip if using a Bioconda install)
+  - pip
+  - pip:
+      - apples
+      - taxtastic

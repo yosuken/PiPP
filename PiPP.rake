@@ -153,6 +153,7 @@ task :default do
     tasks << "01-4f.graft"
     tasks << "01-4h.aligned_position" ## if fpos is given
     tasks << "01-6a.aa_feature"
+    tasks << "01-7a.duckdb_import"
 
     # tasks << "01-4e.extract" ## if ftax is given ### memory requirement is too high for rep_2022-06-08
     # tasks << "01-4g.heat-tree"
@@ -170,6 +171,22 @@ task :default do
 
   ### check witch-ng
   WITCH_NG = "#{__dir__}/bin/witch-ng"
+
+  ### locate pipp_util (bundled Rust binary).
+  ### Search order: env PIPP_UTIL_BIN > $PATH > <project>/rust/target/release/pipp_util
+  PIPP_UTIL = (
+    if (e = ENV["PIPP_UTIL_BIN"]) and File.executable?(e)
+      e
+    elsif !(p = `command -v pipp_util 2>/dev/null`.chomp).empty?
+      p
+    elsif File.executable?(d = "#{__dir__}/rust/target/release/pipp_util")
+      d
+    else
+      raise "#{Errmsg} pipp_util (bundled Rust binary) not found.\n" \
+            "         Install via Bioconda, or build from source:\n" \
+            "         cargo build --release --manifest-path #{__dir__}/rust/Cargo.toml"
+    end
+  )
 
   ### check version
   commands  = %w|hmmsearch mafft gappa pplacer ruby|
@@ -1206,6 +1223,26 @@ task "01-6a.aa_feature", ["step"] do |t, args|
     fout  = "#{odir}/feature.tsv"
     flog  = "#{odir}/feature.log"
     outs << "ruby #{script} #{fout} #{fa} >#{flog} 2>&1"
+  }
+
+  WriteBatch.call(t, Jobdir, outs)
+  RunBatch.call(t, Jobdir, Ncpu, Logdir)
+end
+# }}}
+
+# {{{ desc "01-7a.duckdb_import"
+desc "01-7a.duckdb_import"
+task "01-7a.duckdb_import", ["step"] do |t, args|
+  PrintStatus.call(args.step, NumStep, "START", t)
+  (puts "Already done. Skipped." ; next) if File.exist?("#{Logdir}/#{t.name.split(":")[-1]}/exit") ### skip if already done
+  outs = []
+
+  $fpkgs.each{ |pkg|
+    bdir = "#{Resdir}/#{pkg[:name]}"
+    next unless File.directory?(bdir)
+
+    flog = "#{bdir}/pipp.duckdb.log"
+    outs << "#{PIPP_UTIL} import #{bdir} --refpkg #{pkg[:name]} --overwrite >#{flog} 2>&1"
   }
 
   WriteBatch.call(t, Jobdir, outs)

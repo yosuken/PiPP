@@ -1,0 +1,75 @@
+{% set name = "pipp" %}
+{% set version = "0.4.0" %}
+
+package:
+  name: {{ name }}
+  version: {{ version }}
+
+source:
+  url: https://github.com/yosuken/PiPP/archive/refs/tags/v{{ version }}.tar.gz
+  sha256: 0000000000000000000000000000000000000000000000000000000000000000  # fill after release with `sha256sum`
+
+build:
+  number: 0
+  run_exports:
+    - {{ pin_subpackage(name, max_pin="x") }}
+  script: |
+    set -euxo pipefail
+
+    # 1) bundled Rust binary -> $PREFIX/bin/pipp_util
+    cd rust
+    cargo-bundle-licenses --format yaml --output ../THIRDPARTY.yml
+    cargo install --locked --no-track --root "$PREFIX" --path .
+    cd ..
+
+    # 2) Ruby orchestration + helper scripts -> $PREFIX/share/{{ name }}
+    mkdir -p $PREFIX/share/{{ name }} $PREFIX/bin
+    cp -r PiPP PiPP.rake script bin $PREFIX/share/{{ name }}/
+    chmod +x $PREFIX/share/{{ name }}/PiPP
+    cat > $PREFIX/bin/PiPP <<'EOF'
+    #!/bin/bash
+    DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/../share/{{ name }} && pwd)"
+    exec "$DIR/PiPP" "$@"
+    EOF
+    chmod +x $PREFIX/bin/PiPP
+
+requirements:
+  build:
+    - {{ compiler('rust') }}
+    - cargo-bundle-licenses
+  run:
+    - ruby >=2.7
+    - hmmer >=3.0
+    - mafft >=7.453
+    - gappa >=0.6
+    - pplacer >=1.1.alpha19
+    - parallel
+    - fasttree
+    - epa-ng
+    - duckdb >=1.0
+
+test:
+  commands:
+    - PiPP -v 2>&1 | grep -q "0.4.0"
+    - pipp_util --help 2>&1 | grep -qi "pipp"
+
+about:
+  home: https://github.com/yosuken/PiPP
+  license: MIT
+  license_family: MIT
+  license_file:
+    - LICENSE
+    - THIRDPARTY.yml
+  summary: Pipeline for Phylogenetic Placement (PiPP)
+  description: |
+    PiPP performs phylogenetic placement of a query protein FASTA onto a
+    clade- or taxonomy-defined reference phylogenetic tree, with prefiltering
+    (hmmsearch), alignment (witch-ng / mafft --add), placement
+    (pplacer / apples-2 / epa-ng), and chunked parallelization via
+    `gappa prepare chunkify/unchunkify`.
+  doc_url: https://github.com/yosuken/PiPP
+  dev_url: https://github.com/yosuken/PiPP
+
+extra:
+  recipe-maintainers:
+    - yosuken
