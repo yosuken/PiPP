@@ -39,7 +39,7 @@ A `meta.yaml` recipe is included in the repo as a skeleton for a future Bioconda
 
 ## usage 
 ```
-### PiPP ver 0.3.0 (2025-09-27) ###
+### PiPP ver 0.4.0 (2026-05-23) ###
 
 PiPP - Pipeline for phylogenetic placement.
 PiPP is developed as a tool for phylogenetic placement onto a clade or taxonomy defined phylogenetic tree through procedures below.
