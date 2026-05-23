@@ -46,8 +46,8 @@ pub fn run(args: Args) -> Result<()> {
         }
     }
 
-    let conn = Connection::open(&db_path)
-        .with_context(|| format!("opening DB: {}", db_path.display()))?;
+    let conn =
+        Connection::open(&db_path).with_context(|| format!("opening DB: {}", db_path.display()))?;
     crate::schema::create_all(&conn)?;
 
     let assign_tsv = result_dir.join("assign/per_query.tsv");
@@ -93,7 +93,10 @@ fn parse_opt_f64(s: &str) -> Result<Option<f64>> {
     if t.is_empty() || t == "NA" || t == "nan" || t == "NaN" {
         return Ok(None);
     }
-    Ok(Some(t.parse::<f64>().with_context(|| format!("not a float: {s:?}"))?))
+    Ok(Some(
+        t.parse::<f64>()
+            .with_context(|| format!("not a float: {s:?}"))?,
+    ))
 }
 
 fn parse_opt_i64(s: &str) -> Result<Option<i64>> {
@@ -101,7 +104,10 @@ fn parse_opt_i64(s: &str) -> Result<Option<i64>> {
     if t.is_empty() || t == "NA" {
         return Ok(None);
     }
-    Ok(Some(t.parse::<i64>().with_context(|| format!("not an int: {s:?}"))?))
+    Ok(Some(
+        t.parse::<i64>()
+            .with_context(|| format!("not an int: {s:?}"))?,
+    ))
 }
 
 fn import_assignments(conn: &Connection, refpkg: &str, path: &Path) -> Result<usize> {
@@ -119,10 +125,18 @@ fn import_assignments(conn: &Connection, refpkg: &str, path: &Path) -> Result<us
             ));
         }
         let name = &rec[0];
-        let lwr: f64 = rec[1].parse().with_context(|| format!("LWR at row {}", i + 2))?;
-        let fract: f64 = rec[2].parse().with_context(|| format!("fract at row {}", i + 2))?;
-        let a_lwr: f64 = rec[3].parse().with_context(|| format!("aLWR at row {}", i + 2))?;
-        let a_fract: f64 = rec[4].parse().with_context(|| format!("afract at row {}", i + 2))?;
+        let lwr: f64 = rec[1]
+            .parse()
+            .with_context(|| format!("LWR at row {}", i + 2))?;
+        let fract: f64 = rec[2]
+            .parse()
+            .with_context(|| format!("fract at row {}", i + 2))?;
+        let a_lwr: f64 = rec[3]
+            .parse()
+            .with_context(|| format!("aLWR at row {}", i + 2))?;
+        let a_fract: f64 = rec[4]
+            .parse()
+            .with_context(|| format!("afract at row {}", i + 2))?;
         let taxopath = &rec[5];
         app.append_row(params![refpkg, name, lwr, fract, a_lwr, a_fract, taxopath])?;
         n += 1;
@@ -161,10 +175,9 @@ fn import_aa_features(conn: &Connection, refpkg: &str, path: &Path) -> Result<us
             aa.push(parse_opt_i64(&rec[j])?);
         }
         app.append_row(params![
-            refpkg, gene, len, len_std_aa, avg_mw, n_arsc, c_arsc, s_arsc,
-            aa[0], aa[1], aa[2], aa[3], aa[4], aa[5], aa[6], aa[7], aa[8], aa[9],
-            aa[10], aa[11], aa[12], aa[13], aa[14], aa[15], aa[16], aa[17], aa[18], aa[19],
-            aa[20],
+            refpkg, gene, len, len_std_aa, avg_mw, n_arsc, c_arsc, s_arsc, aa[0], aa[1], aa[2],
+            aa[3], aa[4], aa[5], aa[6], aa[7], aa[8], aa[9], aa[10], aa[11], aa[12], aa[13],
+            aa[14], aa[15], aa[16], aa[17], aa[18], aa[19], aa[20],
         ])?;
         n += 1;
     }

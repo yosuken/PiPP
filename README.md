@@ -138,6 +138,19 @@ $ pipp_util import result/opsin/         # writes result/opsin/pipp.duckdb
 $ pipp_util import result/opsin/ --db custom.duckdb --refpkg opsin --overwrite
 ```
 
+## development / CI
+
+The same checks run on GitHub Actions can be run locally:
+
+```
+$ ci/run.sh             # ruby syntax + rust fmt/clippy/build + pipp_util smoke
+$ ci/run.sh ruby        # only ruby
+$ ci/run.sh rust        # only rust
+$ ci/run.sh smoke       # only the pipp_util import smoke test
+```
+
+The smoke test (`ci/smoke_pipp_util.sh`) writes synthetic TSVs to a temp dir, runs `pipp_util import`, and verifies row counts via the `duckdb` CLI. It does **not** require any of the heavy bio tools (hmmsearch, mafft, gappa, pplacer, witch-ng).
+
 ## migration note (v0.3.x → v0.4.0)
 
 - `-q` now accepts a single query FASTA only. Glob patterns and comma-separated lists are no longer supported.
