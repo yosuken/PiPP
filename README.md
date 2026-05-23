@@ -21,6 +21,22 @@ $ conda create -n PiPP -y && conda activate PiPP
 $ v=PiPP_v0.3.0 && micromamba create -n $v -c conda-forge -c bioconda ruby=3.4.5 hmmer=3.4 parallel=20250822 gappa=0.9.0 pplacer=1.1.alpha19 mafft=7.520 fasttree=2.2.0 epa-ng=0.3.8 python=3.12 -y && micromamba activate $v && pip install apples taxtastic
 ```
 
+### [3] place witch-ng binary (default aligner)
+
+`witch-ng` is the default `--aligner` in PiPP but is not available on Bioconda / conda-forge, so you need to place the binary yourself. Pre-built binaries (Linux x86_64 / macOS) are published on the WITCH-NG releases page:
+
+  https://github.com/RuneBlaze/WITCH-NG/releases
+
+Download the binary for your platform, then put it under PiPP's `bin/` and mark it executable:
+
+```
+### example for Linux x86_64 (witch-ng v0.0.4)
+$ curl -L -o bin/witch-ng https://github.com/RuneBlaze/WITCH-NG/releases/download/v0.0.4/witch-ng-x86_64-linux
+$ chmod +x bin/witch-ng
+```
+
+If you'd rather not install witch-ng, pass `--aligner mafft-add` on every run.
+
 ## usage 
 ```
 ### PiPP ver 0.3.0 (2025-09-27) ###
