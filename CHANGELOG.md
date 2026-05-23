@@ -6,6 +6,28 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project aims to adhere to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Pre-1.0 minor bumps may still include breaking changes.
 
+## Release process
+
+When cutting a release `vX.Y.Z`:
+
+1. Rename `## [Unreleased]` below to `## [X.Y.Z] - YYYY-MM-DD` and add a
+   fresh empty `## [Unreleased]` block above it.
+2. Bump the version in `PiPP` (Ruby `VERSION`/`MODIDATE`), `rust/Cargo.toml`,
+   `environment.yaml` (`name: PiPP_vX.Y.Z`), `meta.yaml`
+   (`{% set version = "X.Y.Z" %}`), and README's `### PiPP ver X.Y.Z` block.
+3. Update the link references at the bottom of this file
+   (`[Unreleased]`, `[X.Y.Z]`).
+4. Commit, then tag and push:
+
+   ```
+   git tag -a vX.Y.Z -m "Release X.Y.Z"
+   git push origin main vX.Y.Z
+   ```
+
+   The release workflow (`.github/workflows/release.yml`) builds prebuilt
+   `pipp_util` binaries for Linux x86_64 and macOS x86_64/aarch64 and
+   attaches them to the GitHub Release.
+
 ## [Unreleased]
 
 ### Added
@@ -50,6 +72,11 @@ Pre-1.0 minor bumps may still include breaking changes.
   `result/<refpkg>/<task>/` layout is the only supported output.
 - Mid-pipeline failures cannot be resumed in place when the default
   cleanup runs. Pass `--keep-intermediate` if you might need to resume.
+
+### Release-time TODO (drop when merging this branch to main)
+- README's CI badge currently pins `?branch=feature/duckdb`. Once this
+  branch lands on `main`, drop the query string so the badge tracks the
+  default branch.
 
 ## [0.3.0] - 2025-09-27
 

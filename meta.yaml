@@ -47,6 +47,14 @@ requirements:
     - fasttree
     - epa-ng
     - duckdb >=1.0
+    # pip is included so users who want optional placers/aligners not on
+    # conda can install them post-install (see `description:` below):
+    #   pip install apples              # required by `--placer apples-2`
+    - pip
+    # witch-ng (the default --aligner) is GPLv3 and not on Bioconda or
+    # conda-forge. It is NOT listed as a run dep; users place the binary
+    # themselves via the bundled `bin/install_witch_ng.sh` script, or pass
+    # `--aligner mafft-add` to skip it.
 
 test:
   commands:
@@ -67,6 +75,13 @@ about:
     (hmmsearch), alignment (witch-ng / mafft --add), placement
     (pplacer / apples-2 / epa-ng), and chunked parallelization via
     `gappa prepare chunkify/unchunkify`.
+
+    Optional tools not packaged on Bioconda/conda-forge:
+      * witch-ng (default `--aligner`; GPLv3). Run
+        `$(dirname $(which PiPP))/../share/pipp/bin/install_witch_ng.sh`
+        after `conda install pipp`, or pass `--aligner mafft-add` to skip.
+      * apples-2 (optional `--placer apples-2`; GPL-3.0). Run
+        `pip install apples` after `conda install pipp`.
   doc_url: https://github.com/yosuken/PiPP
   dev_url: https://github.com/yosuken/PiPP
 

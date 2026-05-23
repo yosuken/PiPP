@@ -4,86 +4,88 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-PiPP (Pipeline for Phylogenetic Placement) is a Ruby-based bioinformatics tool for phylogenetic placement of query sequences onto reference phylogenetic trees. The pipeline accepts a single (large) query FASTA file and runs it through a multi-step workflow involving sequence prefiltering, alignment, and phylogenetic placement analysis.
+PiPP (Pipeline for Phylogenetic Placement) is a bioinformatics tool for phylogenetic placement of a single query protein FASTA onto a clade- or taxonomy-defined reference phylogenetic tree. It is implemented as a Ruby + Rake orchestration layer plus a bundled Rust binary (`pipp_util`).
 
 ## Build and Test Commands
 
-### Running Tests
+### One-shot CI (same as GitHub Actions)
 ```bash
-rake test
-# Or using the default task
-rake
+./ci/run.sh             # ruby -wc + rust fmt/clippy/build/test + pipp_util smoke
+./ci/run.sh ruby        # only ruby
+./ci/run.sh rust        # only rust (fmt, clippy, build, test)
+./ci/run.sh smoke       # only the pipp_util import smoke test
 ```
+
+There is no `rake test` target — Minitest scaffolds under `test/1/` are not implemented.
+
+### Building the bundled Rust binary
+```bash
+cargo build --release --manifest-path rust/Cargo.toml
+```
+
+The Rake pipeline locates `pipp_util` in this order: `$PIPP_UTIL_BIN` → `which pipp_util` → `rust/target/release/pipp_util`.
 
 ### Running the Main Pipeline
 ```bash
-# Basic usage
+# Basic usage (single query FASTA only since v0.4.0)
 ./PiPP -q <query_fasta> -r <refpkg_dir> -o <output_dir>
 
 # Example with options
-./PiPP -q queries/sample.fa -r "refpkgs/*" -o results --ncpus 4 --evalue 1e-10
+./PiPP -q queries/sample.fa -r refpkgs/refpkg1 -o results --ncpus 4 --evalue 1e-10 --keep-intermediate
 ```
-
-### Development Commands
-The project uses Rake as its build system. Key Rake tasks are defined in `PiPP.rake`.
 
 ## Architecture Overview
 
 ### Core Components
 
-1. **Main Pipeline Script (`PiPP`)**: Bash wrapper that validates dependencies, parses command-line arguments, and invokes the Rake-based workflow
-
-2. **Rake Workflow (`PiPP.rake`)**: Orchestrates the entire pipeline through sequential tasks:
-   - Query validation and preprocessing
-   - Reference package validation  
-   - HMM-based sequence prefiltering (hmmsearch)
-   - Sequence alignment (MAFFT)
-   - Phylogenetic placement (pplacer with gappa chunking)
-   - Analysis and visualization
-
-3. **Ruby Processing Scripts (`script/`)**: Specialized utilities for:
-   - Sequence validation and trimming
-   - HMM search result parsing
-   - Alignment processing and format conversion
-   - Feature extraction
+1. **`PiPP` (Ruby entry point)**: parses CLI options, sets ENV, hands off to Rake.
+2. **`PiPP.rake`**: orchestrates the sequential task graph.
+3. **`script/` (Ruby helpers)**: small per-task scripts (validation, alignment post-processing, feature extraction).
+4. **`rust/` (`pipp_util` crate)**: bundled Rust binary providing the `import` (TSV → DuckDB) and `parse-hmmsearch` subcommands. Hot-path scripts are being ported here over time.
 
 ### Pipeline Workflow
 
-The pipeline follows a numbered task sequence (01-1a through 01-6a):
-- **01-1x**: Query validation and preprocessing
-- **01-2x**: HMM-based prefiltering using hmmsearch
-- **01-3x**: Chunked alignment and phylogenetic placement
-- **01-4x**: Placement analysis (assignment, grafting, visualization)
-- **01-5x**: Comparative analysis (KRD, EdgePCA)
-- **01-6x**: Feature extraction
+Numbered task sequence (01-1a through 01-7a):
+- **01-1x**: Query and refpkg validation
+- **01-2x**: HMM-based prefiltering (`hmmsearch` + `pipp_util parse-hmmsearch`)
+- **01-3x**: Chunked alignment (witch-ng / mafft-add) and placement (pplacer / apples-2 / epa-ng)
+- **01-4x**: Placement analysis (info, lwr-list, assign, graft, aligned_position)
+- **01-6x**: AA feature extraction
+- **01-7x**: DuckDB import (`pipp_util import`)
 
 ### Key Dependencies
 
 External tools required:
 - hmmer (≥3.0) for sequence similarity detection
-- mafft (7.453+) for sequence alignment  
+- mafft (7.453+) for sequence alignment
 - gappa (0.6.0+) for placement processing and chunking
 - pplacer (1.1.alpha19+) for phylogenetic placement
+- witch-ng (default `--aligner`; not on conda, install manually — see README)
 - GNU parallel for parallelization
+- Rust toolchain (for building the bundled `pipp_util` binary)
 
 ### Directory Structure
 
-- `script/`: Ruby processing utilities
-- `test/`: Minitest-based test suite
+- `script/`: Ruby processing utilities (per Rake task)
+- `rust/`: `pipp_util` crate (subcommands: `import`, `parse-hmmsearch`)
+- `ci/`: local-runnable CI (`run.sh`, `smoke_pipp_util.sh`)
+- `.github/workflows/`: GitHub Actions
+- `bin/`: helper scripts and the manually-placed `witch-ng` binary
 - Output structure: `result/<refpkg>/{seq,alignment,placement,assign,graft,feature,...}/`
+- DuckDB output: `result/<refpkg>/pipp.duckdb` (tables: `assignments`, `aa_features`, `aligned_positions`)
 - Intermediate dirs (`prefilter/`, `chunks/`, `batch/`, `log/tasks/`) are removed at end of run unless `--keep-intermediate` is passed
 
 ### Configuration
 
 The pipeline accepts extensive command-line configuration including:
-- E-value thresholds for prefiltering
-- Alignment methods (FFT-NS-2, FFT-NS-i, E-INS-i)  
-- Chunk sizes for parallelization
-- Extraction levels for taxonomic analysis
+- E-value thresholds for prefiltering (`-e`, `--evaluedom`)
+- Aligner choice (`witch-ng` (default) or `mafft-add`)
+- Placer choice (`pplacer` (default), `apples-2`, `epa-ng`)
+- Chunk sizes for parallelization (`-c`)
 
 ## Development Notes
 
-- Uses Ruby 2.7+ with Rake for task orchestration
-- Implements custom Range extensions for overlap detection
-- Batch job generation for parallel execution
-- Comprehensive logging and error handling throughout pipeline
+- Ruby (≥2.7) + Rake for orchestration; Rust (≥1.70, edition 2021) for the bundled binary.
+- `ruby -wc` is used in CI for syntax + warnings (no rubocop/standardrb — explicit choice to avoid style wars).
+- `pipp_util` ships its own DuckDB (via the duckdb-rs `bundled` feature); CI installs the duckdb CLI separately for verification.
+- Hot-path Ruby scripts are being ported to Rust one subcommand at a time (parse-hmmsearch already; others candidates: 01-3e.unchunkify_alignment, 01-6a.aa_feature).

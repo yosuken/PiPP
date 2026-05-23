@@ -1,9 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-
-mod cmd_import;
-mod cmd_parse_hmmsearch;
-mod schema;
+use pipp_util::{cmd_import, cmd_parse_hmmsearch};
 
 #[derive(Parser)]
 #[command(name = "pipp_util", version, about = "Utilities for PiPP")]

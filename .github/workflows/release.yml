@@ -1,0 +1,73 @@
+name: release
+
+# Triggered by pushing a vX.Y.Z tag. For each tag we build the bundled
+# pipp_util binary on three targets and attach the resulting archives to
+# the GitHub Release.
+#
+# Local equivalent (one target):
+#   cargo build --release --manifest-path rust/Cargo.toml
+#
+# This workflow doesn't publish to crates.io or bioconda; those remain
+# manual.
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to (re)build, e.g. v0.4.0"
+        required: true
+
+permissions:
+  contents: write   # required to upload release assets
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+          - target: x86_64-apple-darwin
+            os: macos-13         # last Intel runner
+          - target: aarch64-apple-darwin
+            os: macos-14         # Apple Silicon
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+          key: ${{ matrix.target }}
+
+      - name: cargo build --release
+        run: cargo build --release --manifest-path rust/Cargo.toml --target ${{ matrix.target }}
+
+      - name: Package
+        id: pkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          [[ -z "$version" ]] && version="${{ github.event.inputs.tag }}"
+          archive="pipp_util-${version}-${{ matrix.target }}.tar.gz"
+          ( cd rust/target/${{ matrix.target }}/release && tar -czf "$GITHUB_WORKSPACE/$archive" pipp_util )
+          echo "archive=$archive" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.pkg.outputs.archive }}
+          tag_name: ${{ github.event.inputs.tag || github.ref_name }}
+          fail_on_unmatched_files: true
+          draft: false
+          prerelease: false

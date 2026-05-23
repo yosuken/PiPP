@@ -1,7 +1,7 @@
 
 # PiPP - a Pipeline for Phylogenetic Placement
 
-[![CI](https://github.com/yosuken/PiPP/actions/workflows/ci.yml/badge.svg)](https://github.com/yosuken/PiPP/actions/workflows/ci.yml)
+[![CI](https://github.com/yosuken/PiPP/actions/workflows/ci.yml/badge.svg?branch=feature/duckdb)](https://github.com/yosuken/PiPP/actions/workflows/ci.yml?query=branch%3Afeature%2Fduckdb)
 
 ## currently PiPP is beta version. Any specification might be changed in a future version.
 PiPP is developed as a tool for phylogenetic placement onto a clade or taxonomy defined phylogenetic tree through procedures below. A large query file is acceptable.
@@ -34,9 +34,30 @@ The pipeline locates the binary in this order:
 2. `pipp_util` found on `$PATH` (e.g. via Bioconda)
 3. `rust/target/release/pipp_util` (after the `cargo build` above)
 
+### witch-ng binary (default `--aligner`)
+
+`witch-ng` (GPLv3) is the default aligner but is not packaged on Bioconda or conda-forge. A helper fetches the right prebuilt binary into `bin/`:
+
+```
+$ bin/install_witch_ng.sh                       # detects platform, fetches v0.0.4
+$ WITCH_NG_VERSION=v0.0.4 bin/install_witch_ng.sh
+```
+
+If you'd rather skip witch-ng, pass `--aligner mafft-add` on every run.
+
+### apples (optional, for `--placer apples-2`)
+
+`apples` (GPL-3.0) is only on PyPI, not on Bioconda. If you want the apples-2 placer:
+
+```
+$ pip install apples
+```
+
+The default `--placer pplacer` does not need this.
+
 ### (future) Bioconda
 
-A `meta.yaml` recipe is included in the repo as a skeleton for a future Bioconda package. The plan is for `pipp` to install both the Ruby orchestration and the Rust `pipp_util` binary in one shot.
+A `meta.yaml` recipe is included in the repo as a skeleton for a future Bioconda package. The plan is for `pipp` to install the Ruby orchestration and the Rust `pipp_util` binary in one shot. witch-ng / apples will likely remain user-installed (see notes above).
 
 ## usage 
 ```

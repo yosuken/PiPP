@@ -278,6 +278,7 @@ fn pass3_parse_hmmsearch(path: &Path, args: &Args, fa: &FastaStore) -> Result<Pa
     let mut flag = "";
     let mut cur_hmm = String::new();
     let mut cur_gid = String::new();
+    let mut skipped_rows: usize = 0;
 
     for line in rdr.lines() {
         let line = line?;
@@ -338,14 +339,19 @@ fn pass3_parse_hmmsearch(path: &Path, args: &Args, fa: &FastaStore) -> Result<Pa
             if cols.len() < 9 {
                 continue;
             }
-            let full_e: f64 = match cols[0].parse() {
-                Ok(v) => v,
-                Err(_) => continue,
+            let Ok(full_e) = cols[0].parse::<f64>() else {
+                skipped_rows += 1;
+                debug_assert!(false, "summary row full-evalue parse failed: {line:?}");
+                continue;
             };
             if full_e >= args.gene_evalue {
                 continue;
             }
-            let score: f64 = cols[1].parse().unwrap_or(0.0);
+            let Ok(score) = cols[1].parse::<f64>() else {
+                skipped_rows += 1;
+                debug_assert!(false, "summary row score parse failed: {line:?}");
+                continue;
+            };
             let gid = cols[8].to_string();
             inc_gids
                 .entry(gid)
@@ -360,23 +366,10 @@ fn pass3_parse_hmmsearch(path: &Path, args: &Args, fa: &FastaStore) -> Result<Pa
                 continue;
             }
             // Ruby code uses values_at(2..7, 9..10, 12..13, 15) → score, bias, c-Eval, i-Eval, hmm.fm, hmm.to, ali.fm, ali.to, env.fm, env.to, acc
-            let parse_f = |s: &str| -> f64 { s.parse().unwrap_or(0.0) };
-            let parse_u = |s: &str| -> usize { s.parse().unwrap_or(0) };
-            let hit = DomainHit {
-                hmm: cur_hmm.clone(),
-                score: parse_f(cols[2]),
-                bias: parse_f(cols[3]),
-                c_evalue: parse_f(cols[4]),
-                i_evalue: parse_f(cols[5]),
-                hmm_fm: parse_u(cols[6]),
-                hmm_to: parse_u(cols[7]),
-                ali_fm: parse_u(cols[9]),
-                ali_to: parse_u(cols[10]),
-                env_fm: parse_u(cols[12]),
-                env_to: parse_u(cols[13]),
-                acc: parse_f(cols[15]),
-                full_evalue: 0.0,
-                full_score: 0.0,
+            let Some(hit) = parse_domain_row(&cols, &cur_hmm) else {
+                skipped_rows += 1;
+                debug_assert!(false, "domain row parse failed: {line:?}");
+                continue;
             };
 
             // domain-level filters
@@ -427,7 +420,35 @@ fn pass3_parse_hmmsearch(path: &Path, args: &Args, fa: &FastaStore) -> Result<Pa
     out.hmm_order
         .retain(|h| seen.insert(h.clone(), ()).is_none());
 
+    if skipped_rows > 0 {
+        eprintln!(
+            "  warning: skipped {skipped_rows} unparseable row(s) in {}",
+            path.display()
+        );
+    }
+
     Ok(out)
+}
+
+/// Parse a domain table row. Returns None if any required numeric column
+/// cannot be parsed; callers should bump a skip counter and continue.
+fn parse_domain_row(cols: &[&str], cur_hmm: &str) -> Option<DomainHit> {
+    Some(DomainHit {
+        hmm: cur_hmm.to_string(),
+        score: cols.get(2)?.parse().ok()?,
+        bias: cols.get(3)?.parse().ok()?,
+        c_evalue: cols.get(4)?.parse().ok()?,
+        i_evalue: cols.get(5)?.parse().ok()?,
+        hmm_fm: cols.get(6)?.parse().ok()?,
+        hmm_to: cols.get(7)?.parse().ok()?,
+        ali_fm: cols.get(9)?.parse().ok()?,
+        ali_to: cols.get(10)?.parse().ok()?,
+        env_fm: cols.get(12)?.parse().ok()?,
+        env_to: cols.get(13)?.parse().ok()?,
+        acc: cols.get(15)?.parse().ok()?,
+        full_evalue: 0.0,
+        full_score: 0.0,
+    })
 }
 
 // ---- output -------------------------------------------------------------
@@ -827,5 +848,34 @@ mod tests {
         assert!(!starts_with_indent_digit("Query: name"));
         assert!(!starts_with_indent_digit(""));
         assert!(!starts_with_indent_digit("    abc"));
+    }
+
+    #[test]
+    fn parse_domain_row_happy_path() {
+        // 16 cols: idx, '?', score, bias, c-Evalue, i-Evalue,
+        //          hmmfrom, hmmto, '..', alifrom, alito, '..', envfrom, envto, '..', acc
+        let cols = [
+            "1", "?", "51.2", "0.4", "1e-12", "6.3e-12", "1", "40", "..", "16", "57", "..", "5",
+            "74", "..", "0.79",
+        ];
+        let h = parse_domain_row(&cols, "MyHmm").expect("should parse");
+        assert_eq!(h.hmm, "MyHmm");
+        assert_eq!(h.score, 51.2);
+        assert_eq!(h.hmm_fm, 1);
+        assert_eq!(h.hmm_to, 40);
+        assert_eq!(h.ali_fm, 16);
+        assert_eq!(h.ali_to, 57);
+        assert_eq!(h.acc, 0.79);
+    }
+
+    #[test]
+    fn parse_domain_row_returns_none_on_malformed() {
+        let cols = [
+            "1", "?", "abc", "0.4", "x", "y", "1", "40", "..", "16", "57", "..", "5", "74", "..",
+            "0.79",
+        ];
+        assert!(parse_domain_row(&cols, "MyHmm").is_none());
+        let short = ["1", "?", "51.2"]; // not enough cols
+        assert!(parse_domain_row(&short, "MyHmm").is_none());
     }
 }
