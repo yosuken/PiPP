@@ -46,11 +46,28 @@ pub fn run(args: Args) -> Result<()> {
     }
 
     if n_nonfinite == 0 && n_branch == 0 {
-        return Ok(()); // already clean; leave the file untouched
+        return Ok(()); // already clean; leave the file (and no record) untouched
     }
 
     let out = serde_json::to_string(&v).context("serializing sanitized jplace")?;
     fs::write(&args.jplace, out).with_context(|| format!("writing {}", args.jplace.display()))?;
+
+    // Record what was clamped next to the jplace, so `pipp_util import` can
+    // load it into the jplace_clamps DuckDB table. A sidecar is written only
+    // when something was actually clamped (the fix was "used").
+    let basename = args
+        .jplace
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let mut sidecar = args.jplace.clone().into_os_string();
+    sidecar.push(".clamp.tsv");
+    fs::write(
+        &sidecar,
+        format!("jplace\tn_nonfinite\tn_neg_branch\n{basename}\t{n_nonfinite}\t{n_branch}\n"),
+    )
+    .with_context(|| format!("writing clamp record {:?}", sidecar))?;
+
     eprintln!(
         "clamp-jplace: {n_nonfinite} non-finite value(s) -> 0, {n_branch} negative branch length(s) clamped in {}",
         args.jplace.display()
@@ -118,9 +135,7 @@ fn match_nonfinite_word(b: &[u8]) -> Option<usize> {
     let lower: Vec<u8> = b[..n].iter().map(|c| c.to_ascii_lowercase()).collect();
     if lower.starts_with(b"infinity") {
         Some(8)
-    } else if lower.starts_with(b"inf") {
-        Some(3)
-    } else if lower.starts_with(b"nan") {
+    } else if lower.starts_with(b"inf") || lower.starts_with(b"nan") {
         Some(3)
     } else {
         None

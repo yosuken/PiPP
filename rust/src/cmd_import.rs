@@ -74,8 +74,45 @@ pub fn run(args: Args) -> Result<()> {
         eprintln!("skip aligned_positions: {} not found", pos_tsv.display());
     }
 
+    // jplace clamp records (one *.clamp.tsv per sanitized jplace; absent when
+    // nothing was clamped).
+    let n = import_jplace_clamps(&conn, &refpkg, &result_dir.join("placement"))?;
+    if n > 0 {
+        eprintln!("imported {} rows into jplace_clamps", n);
+    }
+
     eprintln!("wrote {}", db_path.display());
     Ok(())
+}
+
+fn import_jplace_clamps(conn: &Connection, refpkg: &str, placement_dir: &Path) -> Result<usize> {
+    if !placement_dir.is_dir() {
+        return Ok(0);
+    }
+    let mut app = conn.appender("jplace_clamps")?;
+    let mut n = 0usize;
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(placement_dir)
+        .with_context(|| format!("reading {}", placement_dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.to_string_lossy().ends_with(".clamp.tsv"))
+        .collect();
+    entries.sort();
+    for path in entries {
+        let mut rdr = tsv_reader(&path)?;
+        for rec in rdr.records() {
+            let rec = rec.with_context(|| format!("reading {}", path.display()))?;
+            if rec.len() < 3 {
+                continue;
+            }
+            let jplace = &rec[0];
+            let nf: i64 = rec[1].trim().parse().unwrap_or(0);
+            let nb: i64 = rec[2].trim().parse().unwrap_or(0);
+            app.append_row(params![refpkg, jplace, nf, nb])?;
+            n += 1;
+        }
+    }
+    app.flush()?;
+    Ok(n)
 }
 
 fn tsv_reader(path: &Path) -> Result<csv::Reader<std::fs::File>> {

@@ -895,12 +895,13 @@ task "01-3d.unchunkify", ["step"] do |t, args|
     flog  = "#{odir}/unchunkify.log"
 
     cmd = "#{cmd1} --out-dir #{odir} --abundances-path #{fabus} --jplace-path #{fplcs} >#{flog} 2>&1"
-    ### apples-2 jplace can carry -nan (introduced here by gappa unchunkify)
-    ### and negative branch lengths; sanitize so the downstream gappa steps
-    ### (01-4a info, lwr-list, assign, graft) can parse it.
-    if Placer == "apples-2"
-      cmd += %{ && for j in #{odir}/*.jplace; do #{PIPP_UTIL} clamp-jplace "$j" >>#{flog} 2>&1; done}
-    end
+    ### Sanitize every placer's jplace: gappa unchunkify can introduce -nan
+    ### pendant lengths, and apples-2 trees carry negative branch lengths;
+    ### either makes the jplace unparseable by the downstream gappa steps
+    ### (01-4a info, lwr-list, assign, graft). clamp-jplace is a no-op on
+    ### clean files (pplacer/epa-ng) and writes a <jplace>.clamp.tsv record
+    ### only when it actually clamps something (-> jplace_clamps table).
+    cmd += %{ && for j in #{odir}/*.jplace; do #{PIPP_UTIL} clamp-jplace "$j" >>#{flog} 2>&1; done}
     outs << cmd
   }
 

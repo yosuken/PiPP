@@ -54,6 +54,16 @@ pub fn create_all(conn: &Connection) -> Result<()> {
             fract      DOUBLE,
             taxpath    TEXT
         );
+
+        -- records when `pipp_util clamp-jplace` actually sanitized a placement
+        -- jplace (non-finite values and/or negative branch lengths). A row
+        -- here means the avoidance fix was used for that placement.
+        CREATE TABLE IF NOT EXISTS jplace_clamps (
+            refpkg       TEXT   NOT NULL,
+            jplace       TEXT   NOT NULL,
+            n_nonfinite  BIGINT NOT NULL,
+            n_neg_branch BIGINT NOT NULL
+        );
         "#,
     )?;
     Ok(())
