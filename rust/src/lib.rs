@@ -6,4 +6,5 @@
 
 pub mod cmd_import;
 pub mod cmd_parse_hmmsearch;
+pub mod cmd_validate_query;
 pub mod schema;

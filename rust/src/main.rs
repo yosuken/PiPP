@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use pipp_util::{cmd_import, cmd_parse_hmmsearch};
+use pipp_util::{cmd_import, cmd_parse_hmmsearch, cmd_validate_query};
 
 #[derive(Parser)]
 #[command(name = "pipp_util", version, about = "Utilities for PiPP")]
@@ -16,6 +16,9 @@ enum Cmd {
     /// Parse an hmmsearch output and emit best-hit / all-hit tables and fastas
     #[command(name = "parse-hmmsearch")]
     ParseHmmsearch(cmd_parse_hmmsearch::Args),
+    /// Validate + clean a query FASTA (single pass, streaming MD5)
+    #[command(name = "validate-query")]
+    ValidateQuery(cmd_validate_query::Args),
 }
 
 fn main() -> Result<()> {
@@ -23,5 +26,6 @@ fn main() -> Result<()> {
     match cli.cmd {
         Cmd::Import(args) => cmd_import::run(args),
         Cmd::ParseHmmsearch(args) => cmd_parse_hmmsearch::run(args),
+        Cmd::ValidateQuery(args) => cmd_validate_query::run(args),
     }
 }

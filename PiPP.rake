@@ -245,7 +245,6 @@ task "01-1a-A.validate_query", ["step"] do |t, args|
   ### [!!!] should not be skipped even if already done
   PrintStatus.call(args.step, NumStep, "START", t)
   outs   = []
-  script = "#{__dir__}/script/#{t.name}.rb"
 
   ## validate query and make a copy
   fque = Fque
@@ -274,7 +273,7 @@ task "01-1a-A.validate_query", ["step"] do |t, args|
   flst = "#{PreQuedir}/#{name}.list"
 
   if !File.exist?(fjsn)
-    outs << "ruby #{script} #{MinSeqLen} #{name} #{fque} #{fa} #{fjsn} #{flst}"
+    outs << "#{PIPP_UTIL} validate-query --min-seq-len #{MinSeqLen} --name #{name} -i #{fque} --fa #{fa} --json #{fjsn} --list #{flst}"
   end
 
   next if outs.size == 0
