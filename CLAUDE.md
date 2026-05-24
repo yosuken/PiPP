@@ -81,7 +81,7 @@ The pipeline accepts extensive command-line configuration including:
 - E-value thresholds for prefiltering (`-e`, `--evaluedom`)
 - Aligner choice (`witch-ng` (default) or `mafft-add`)
 - witch-ng eHMM decomposition size (`--witch-ng-hmm-size-lb`, default: backbone leaf count / 20)
-- Placer choice (`apples-2` (default), `pplacer`, `epa-ng`)
+- Placer choice (`pplacer` (default), `apples-2`, `epa-ng`)
 - Chunk sizes for parallelization (`-c`)
 
 ## Development Notes

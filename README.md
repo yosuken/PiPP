@@ -45,17 +45,17 @@ $ WITCH_NG_VERSION=v0.0.4 bin/install_witch_ng.sh
 
 If you'd rather skip witch-ng, pass `--aligner mafft-add` on every run.
 
-### apples (required for the default `--placer apples-2`)
+### apples (optional, for `--placer apples-2`)
 
-apples-2 is the **default placer**. `apples` (GPL-3.0) is only on PyPI, not
-on Bioconda, so install it via pip:
+The default placer is `pplacer` (on Bioconda, no extra step). `apples`
+(GPL-3.0) is only on PyPI, so install it via pip only if you want the
+apples-2 placer:
 
 ```
 $ pip install apples
 ```
 
-(The bundled `environment.yaml` already includes this.) If you'd rather
-not use apples, pass `--placer pplacer` (or `--placer epa-ng --epa-ng-model <model>`).
+(The bundled `environment.yaml` already includes this.)
 
 ### (future) Bioconda
 
@@ -123,7 +123,7 @@ $ PiPP [options] -q <query fasta> -r <refpkg dir(s)> -o <output dir>
         --witch-ng-hmm-size-lb INT   witch-ng eHMM decomposition size lower bound (default: backbone leaf count / 20)
 
 [Placement]
-        --placer OPTION              phylogenetic placement tool (default: apples-2) [pplacer|apples-2|epa-ng]
+        --placer OPTION              phylogenetic placement tool (default: pplacer) [pplacer|apples-2|epa-ng]
         --epa-ng-model MODEL         model for epa-ng, either model name (e.g., LG, PROTGTR, ...) or tree log file (compatible with RAxML 8.x and IQ-TREE)
                                      [required when '--placer epa-ng' is selected]
                                      Please refer to epa-ng document. [https://github.com/pierrebarbera/epa-ng?tab=readme-ov-file#setting-the-model-parameters]
