@@ -91,6 +91,7 @@ task :default do
   EvalueDom    = ENV["evaluedom"].to_f    ## hmmsearch domain evalue threshold (default: 1e-2)
 
   MinSeqLen    = ENV["minseqlen"].to_i    ## minimum query length
+  MaxSeqLen    = (ENV["maxseqlen"].to_s.empty? ? 100000 : ENV["maxseqlen"].to_i)  ## maximum query length (HMMER aborts > 100000 aa)
   MinHmmLen    = ENV["minhmmlen"].to_i    ## hmmsearch minimum region hit length of hmm
   MinHmmCov    = ENV["minhmmcov"].to_f    ## minimum fraction of hmmsearch minimum region hit length of hmm per domain length
   MinAliLen    = ENV["minalilen"].to_i    ## hmmsearch minimum region hit length of ali
@@ -273,7 +274,7 @@ task "01-1a-A.validate_query", ["step"] do |t, args|
   flst = "#{PreQuedir}/#{name}.list"
 
   if !File.exist?(fjsn)
-    outs << "#{PIPP_UTIL} validate-query --min-seq-len #{MinSeqLen} --name #{name} -i #{fque} --fa #{fa} --json #{fjsn} --list #{flst}"
+    outs << "#{PIPP_UTIL} validate-query --min-seq-len #{MinSeqLen} --max-seq-len #{MaxSeqLen} --name #{name} -i #{fque} --fa #{fa} --json #{fjsn} --list #{flst}"
   end
 
   next if outs.size == 0

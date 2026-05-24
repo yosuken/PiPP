@@ -18,15 +18,24 @@ $ micromamba activate PiPP_v0.4.0
 `install.sh` wraps two steps. You can run them by hand if you prefer:
 
 ```
-### [1] conda env (all bio tools + rust toolchain)
-$ micromamba env create -f environment.yaml
+### [1] runtime conda env (all bio tools). flexible priority is required:
+###     a strict solve fails (pplacer/fasttree deps vs latest conda-forge).
+$ micromamba env create -f environment.yaml --channel-priority flexible
 $ micromamba activate PiPP_v0.4.0
 
-### [2] build the bundled Rust binary `pipp_util`
+### [2] build the bundled Rust binary `pipp_util` (needs a Rust toolchain;
+###     rustup recommended — `cargo` just needs to be on PATH)
 $ cargo build --release --manifest-path rust/Cargo.toml
 ```
 
 `pipp_util` ingests the per-refpkg TSV outputs into a DuckDB file at the end of the pipeline.
+
+> **Note on `rust` and `duckdb`:** neither is in `environment.yaml`. Rust is
+> build-time only (it compiles `pipp_util`); use a system toolchain (rustup),
+> or let `install.sh` spin up a throwaway conda env if `cargo` isn't on PATH.
+> `duckdb` is not a runtime dependency at all — `pipp_util` bundles its own
+> DuckDB. A `duckdb` CLI (>=1.0) is optional, only for querying the output DBs
+> (use any system install / mise / conda).
 
 The pipeline locates the binary in this order:
 
@@ -98,6 +107,7 @@ $ PiPP [options] -q <query fasta> -r <refpkg dir(s)> -o <output dir>
     -o, --outdir PATH                Output directory [required]
         --[no-]overwrite             Overwrite output directory (default: overwrite)
         --keep-intermediate          Keep intermediate files (prefilter/, chunks/, batch/, log/tasks/) after run (default: removed)
+        --copy-refpkg                Copy refpkg derived files (backbone/trees/eHMM) into the run's refpkg/ dir (default: reference the <refpkg>/derived cache in place)
 
 [Task]
         --only-detect                Only detect homologous regions of input sequences using hmmsearch

@@ -50,6 +50,14 @@ pub struct Args {
     /// cleaned FASTA (but still listed in the ID list)
     #[arg(long = "min-seq-len", default_value_t = 0)]
     pub min_seq_len: usize,
+
+    /// Maximum amino-acid length; longer sequences are dropped from the
+    /// cleaned FASTA (but still listed in the ID list). Default 100000 is
+    /// HMMER's hard protein-pipeline limit: a single sequence > 100000 aa
+    /// makes hmmsearch abort with a fatal exception (p7_pipeline.c), taking
+    /// the whole run down, so such sequences are skipped up front.
+    #[arg(long = "max-seq-len", default_value_t = 100_000)]
+    pub max_seq_len: usize,
 }
 
 #[derive(Serialize)]
@@ -57,6 +65,7 @@ struct Meta {
     name: String,
     numseq: usize,
     numtooshortseq: usize,
+    numtoolongseq: usize,
     fasta: String,
     fjson: String,
     fasta_ori: String,
@@ -149,7 +158,8 @@ pub fn run(args: Args) -> Result<()> {
     let mut list_w = BufWriter::new(list_file);
 
     let mut numseq = 0usize;
-    let mut numex = 0usize;
+    let mut numtooshort = 0usize;
+    let mut numtoolong = 0usize;
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     let mut cur_id: Option<String> = None;
@@ -175,8 +185,10 @@ pub fn run(args: Args) -> Result<()> {
                     &id,
                     &seq,
                     args.min_seq_len,
+                    args.max_seq_len,
                     &mut numseq,
-                    &mut numex,
+                    &mut numtooshort,
+                    &mut numtoolong,
                 )?;
             }
             seq.clear();
@@ -205,8 +217,10 @@ pub fn run(args: Args) -> Result<()> {
             &id,
             &seq,
             args.min_seq_len,
+            args.max_seq_len,
             &mut numseq,
-            &mut numex,
+            &mut numtooshort,
+            &mut numtoolong,
         )?;
     }
 
@@ -228,7 +242,8 @@ pub fn run(args: Args) -> Result<()> {
     let meta = Meta {
         name: args.name.clone(),
         numseq,
-        numtooshortseq: numex,
+        numtooshortseq: numtooshort,
+        numtoolongseq: numtoolong,
         fasta: args.fa.to_string_lossy().into_owned(),
         fjson: args.json.to_string_lossy().into_owned(),
         fasta_ori: absolute_path(&args.query).to_string_lossy().into_owned(),
@@ -241,28 +256,36 @@ pub fn run(args: Args) -> Result<()> {
     writeln!(jf, "{json}").context("writing json")?;
 
     eprintln!(
-        "validate-query: {numseq} kept, {numex} too short (< {} aa)",
-        args.min_seq_len
+        "validate-query: {numseq} kept, {numtooshort} too short (< {} aa), {numtoolong} too long (> {} aa)",
+        args.min_seq_len, args.max_seq_len
     );
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn flush_record<W: Write>(
     fa_w: &mut W,
     id: &str,
     seq: &str,
     min_len: usize,
+    max_len: usize,
     numseq: &mut usize,
-    numex: &mut usize,
+    numtooshort: &mut usize,
+    numtoolong: &mut usize,
 ) -> Result<()> {
-    if seq.len() >= min_len {
+    let len = seq.len();
+    if len < min_len {
+        *numtooshort += 1;
+    } else if len > max_len {
+        // HMMER's protein pipeline aborts on target sequences > 100000 aa
+        // (the default max_len), so these are dropped before hmmsearch.
+        *numtoolong += 1;
+    } else {
         *numseq += 1;
         // Trailing space after id is intentional (gappa chunkify abundance
         // parsing). Matches Ruby `fw.puts [">"+id+" ", seq]`.
         writeln!(fa_w, ">{id} ").context("writing fa header")?;
         writeln!(fa_w, "{seq}").context("writing fa seq")?;
-    } else {
-        *numex += 1;
     }
     Ok(())
 }
@@ -301,6 +324,7 @@ mod tests {
             json: json.clone(),
             list: list.clone(),
             min_seq_len: 4,
+            max_seq_len: 100_000,
         })
         .unwrap();
 
@@ -331,8 +355,37 @@ mod tests {
             json: dir.path().join("o.json"),
             list: dir.path().join("o.list"),
             min_seq_len: 0,
+            max_seq_len: 100_000,
         });
         assert!(r.is_err());
         assert!(r.unwrap_err().to_string().contains("twice"));
+    }
+
+    #[test]
+    fn drops_too_long_sequences() {
+        // s1 ok (10), s2 too long (15 > max 12), s3 ok (5)
+        let long = "A".repeat(15);
+        let q = write_tmp(&format!(">s1\nMKLAPCDEFG\n>s2\n{long}\n>s3\nMMMMM\n"));
+        let dir = tempfile::tempdir().unwrap();
+        let fa = dir.path().join("o.fa");
+        let json = dir.path().join("o.json");
+        run(Args {
+            query: q.path().to_path_buf(),
+            name: "q".into(),
+            fa: fa.clone(),
+            json: json.clone(),
+            list: dir.path().join("o.list"),
+            min_seq_len: 0,
+            max_seq_len: 12,
+        })
+        .unwrap();
+
+        let fa_s = std::fs::read_to_string(&fa).unwrap();
+        assert_eq!(fa_s, ">s1 \nMKLAPCDEFG\n>s3 \nMMMMM\n"); // s2 dropped
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&json).unwrap()).unwrap();
+        assert_eq!(v["numseq"], 2);
+        assert_eq!(v["numtoolongseq"], 1);
+        assert_eq!(v["numtooshortseq"], 0);
     }
 }

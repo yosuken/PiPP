@@ -41,19 +41,29 @@ open(fhmmO){ |fr|
   end
 }
 
-### output paths in odir
-faln = "#{odir}/backbone.mfa"
-ftre = "#{odir}/backbone.nwk"
-fhmm = "#{odir}/backbone.hmm"
-ftax = ftaxO ? "#{odir}/taxon.tsv" : nil
-fpos = fposO ? "#{odir}/position.tsv" : nil
+### Where the derived files for this run live (and what backbone.json
+### references). By default, when the cache is valid we reference it *in
+### place* under <rpkg>/derived/ — no per-run copy (the eHMM caches alone are
+### tens of MB per refpkg, so copying them into every run dir is pure waste;
+### downstream tasks only read these files). Pass --copy-refpkg (ENV
+### copy_refpkg) to materialize a full isolated copy under odir instead.
+### On a cache miss we must generate into a writable place: odir.
+copy_refpkg = ENV["copy_refpkg"] == "true"
+dest = (cache_valid && !copy_refpkg) ? derived : odir
 
-apdir  = "#{odir}/for_apples-2"
+### derived-file paths (under dest)
+faln = "#{dest}/backbone.mfa"
+ftre = "#{dest}/backbone.nwk"
+fhmm = "#{dest}/backbone.hmm"
+ftax = ftaxO ? "#{dest}/taxon.tsv" : nil
+fpos = fposO ? "#{dest}/position.tsv" : nil
+
+apdir  = "#{dest}/for_apples-2"
 ftreME = "#{apdir}/backbone_min_evo.nwk"
 flogME = "#{apdir}/backbone_min_evo.log"
 ferrME = "#{apdir}/backbone_min_evo.err"
 
-ppdir  = "#{odir}/for_pplacer"
+ppdir  = "#{dest}/for_pplacer"
 ftreGM = "#{ppdir}/backbone_gamma.nwk"
 flogGM = "#{ppdir}/backbone_gamma.log"
 ferrGM = "#{ppdir}/backbone_gamma.err"
@@ -98,14 +108,19 @@ end
 # }}}
 
 if cache_valid
-  ### cache hit: copy derived files into odir (skip FastTree / taxit)
-  puts "### refpkg derived cache hit: #{derived} -> #{odir}"
-  Dir["#{derived}/*"].each{ |path|
-    base = File.basename(path)
-    next if base == "SOURCE.md5"      ### key file, not a product
-    next if base == "backbone.json"   ### regenerated fresh below with odir paths
-    FileUtils.cp_r(path, "#{odir}/")
-  }
+  if dest == odir
+    ### --copy-refpkg: materialize a full isolated copy under odir
+    puts "### refpkg derived cache hit: copying #{derived} -> #{odir} (--copy-refpkg)"
+    Dir["#{derived}/*"].each{ |path|
+      base = File.basename(path)
+      next if base == "SOURCE.md5"      ### key file, not a product
+      next if base == "backbone.json"   ### regenerated fresh below with odir paths
+      FileUtils.cp_r(path, "#{odir}/")
+    }
+  else
+    ### default: reference the cache in place (no copy)
+    puts "### refpkg derived cache hit: referencing #{derived} in place (pass --copy-refpkg to copy into the run dir)"
+  end
 else
   ### cache miss: generate into odir
   generate_derived(odir, falnO, ftreO, fhmmO, ftaxO, fposO,

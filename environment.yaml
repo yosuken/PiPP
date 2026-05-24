@@ -1,20 +1,26 @@
 name: PiPP_v0.4.0
 channels:
-  - bioconda
   - conda-forge
+  - bioconda
 dependencies:
-  - ruby >=2.7
+  - ruby >=3,<4          # pin to the 3.x series (4.0 is a new major; PiPP validated on 3.4)
   - hmmer >=3.0
   - mafft >=7.453
   - gappa >=0.6
-  - pplacer >=1.1.alpha19
+  - pplacer >=1.1.alpha22   # alpha22 is rebuilt against current libs (libgcc>=13, gsl 2.8); alpha19 had stale deps
   - parallel
   - fasttree
   - epa-ng
   - python >=3.10
-  - duckdb >=1.0    # CLI; pipp_util bundles its own DuckDB via duckdb-rs
-  - rust            # required to build pipp_util from source (skip if using a Bioconda install)
+  # NOTE: rust and duckdb are intentionally NOT in this runtime env.
+  #   - rust   : build-time only (compiles pipp_util). Use a system Rust
+  #              toolchain (rustup recommended); install.sh falls back to a
+  #              throwaway conda env if no `cargo` is on PATH.
+  #   - duckdb : not a runtime dep — pipp_util bundles its own DuckDB via
+  #              duckdb-rs. A duckdb CLI (>=1.0) is optional, only for querying
+  #              the output DBs / CI smoke test; use any system install.
   - pip
   - pip:
+      - setuptools <81   # apples 2.0.11 imports pkg_resources, removed in setuptools 81+
       - apples
       - taxtastic

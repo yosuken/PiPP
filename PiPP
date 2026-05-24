@@ -32,11 +32,13 @@ class PiPP
       overwrite: false,
       only_detect: false,
       keep_intermediate: false,
-      
+      copy_refpkg: false,
+
       # Prefilter options
       evalue:       1e-5,
       evaluedom:    1e-2,
       minseqlen:    0,
+      maxseqlen:    100000,
       minhmmlen:    0,
       minhmmcov:    0.0,
       minalilen:    0,
@@ -140,6 +142,10 @@ class PiPP
       opts.on("--keep-intermediate", "Keep intermediate files (prefilter/, chunks/, batch/, log/tasks/) after run (default: removed)") do
         @options[:keep_intermediate] = true
       end
+
+      opts.on("--copy-refpkg", "Copy refpkg derived files (backbone/trees/eHMM) into the run's refpkg/ dir (default: reference the <refpkg>/derived cache in place)") do
+        @options[:copy_refpkg] = true
+      end
       # }}}
       
       # {{{ Task options
@@ -159,7 +165,11 @@ class PiPP
       opts.on("--minseqlen INT", Integer, "set a cutoff of minimum amino acid length of input sequences (default: 0)") do |v|
         @options[:minseqlen] = v
       end
-      
+
+      opts.on("--maxseqlen INT", Integer, "set a cutoff of maximum amino acid length of input sequences (default: 100000; HMMER aborts on sequences > 100000 aa)") do |v|
+        @options[:maxseqlen] = v
+      end
+
       opts.on("--minhmmlen INT", Integer, "Minimum hmm hit length in linked result of hmmsearch (default: 0)") do |v|
         @options[:minhmmlen] = v
       end
@@ -353,7 +363,21 @@ class PiPP
       $stderr.puts "#{ERRMSG}  --minseqlen '#{@options[:minseqlen]}' should be non-negative integer."
       exit 1
     end
-    
+
+    if @options[:maxseqlen] < 1
+      $stderr.puts "#{ERRMSG}  --maxseqlen '#{@options[:maxseqlen]}' should be a positive integer."
+      exit 1
+    end
+
+    if @options[:maxseqlen] < @options[:minseqlen]
+      $stderr.puts "#{ERRMSG}  --maxseqlen '#{@options[:maxseqlen]}' should be >= --minseqlen '#{@options[:minseqlen]}'."
+      exit 1
+    end
+
+    if @options[:maxseqlen] > 100000
+      $stderr.puts "\e[1;33m[warning]\e[0m  --maxseqlen '#{@options[:maxseqlen]}' exceeds HMMER's 100000 aa limit; sequences > 100000 aa will still abort hmmsearch."
+    end
+
     if @options[:minhmmlen] < 0
       $stderr.puts "#{ERRMSG}  --minhmmlen '#{@options[:minhmmlen]}' should be non-negative integer."
       exit 1
@@ -430,6 +454,7 @@ class PiPP
       "evalue"         => @options[:evalue].to_s,
       "evaluedom"      => @options[:evaluedom].to_s,
       "minseqlen"      => @options[:minseqlen].to_s,
+      "maxseqlen"      => @options[:maxseqlen].to_s,
       "minhmmlen"      => @options[:minhmmlen].to_s,
       "minhmmcov"      => @options[:minhmmcov].to_s,
       "minalilen"      => @options[:minalilen].to_s,
@@ -443,7 +468,8 @@ class PiPP
       "chunk_size"     => @options[:chunk_size].to_s,
       "ncpus"          => @options[:ncpus].to_s,
       "only_detect"       => @options[:only_detect] ? "true" : "",
-      "keep_intermediate" => @options[:keep_intermediate] ? "true" : ""
+      "keep_intermediate" => @options[:keep_intermediate] ? "true" : "",
+      "copy_refpkg"       => @options[:copy_refpkg] ? "true" : ""
       # "trim_option"    => @options[:trim_option],
     }
     

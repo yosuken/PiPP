@@ -83,6 +83,7 @@ The pipeline accepts extensive command-line configuration including:
 - witch-ng eHMM decomposition size (`--witch-ng-hmm-size-lb`, default: backbone leaf count / 20)
 - Placer choice (`pplacer` (default), `apples-2`, `epa-ng`)
 - Chunk sizes for parallelization (`-c`)
+- Refpkg derived-file handling (`--copy-refpkg`): by default a valid `<refpkg>/derived/` cache (backbone.mfa, FastTree min-evo/gamma trees, taxit package, witch-ng eHMMs) is referenced in place so the run's `refpkg/` dir stays tiny; `--copy-refpkg` materializes a full isolated copy under `refpkg/<name>/` (tens of MB per refpkg, mostly eHMMs)
 
 ## Development Notes
 
