@@ -88,19 +88,77 @@ struct HmmMeta {
 #[derive(Clone)]
 struct DomainHit {
     hmm: String,
-    score: f64,
-    bias: f64,
-    c_evalue: f64,
+    // Verbatim hmmsearch text for output-only columns. Ruby keeps these
+    // as strings (`values_at` on a split line) so we preserve them byte
+    // for byte to match. Ruby's `Float#to_s` happens to roundtrip these
+    // exactly, so emitting the original string also matches Ruby's
+    // formatted output byte for byte.
+    score: String,
+    bias: String,
+    c_evalue: String,
+    i_evalue_str: String,
+    env_fm: String,
+    env_to: String,
+    acc: String,
+    full_evalue_str: String,
+    full_score: String,
+    // Parsed copies used for filtering, sorting, and range arithmetic.
     i_evalue: f64,
     hmm_fm: usize,
     hmm_to: usize,
     ali_fm: usize,
     ali_to: usize,
-    env_fm: usize,
-    env_to: usize,
-    acc: f64,
     full_evalue: f64,
-    full_score: f64,
+}
+
+// ---- formatting helper ----------------------------------------------------
+
+/// Apply Ruby's `Float#to_s` cosmetic normalization to a numeric string,
+/// without parsing it to f64:
+///   * scientific notation (contains `e`): ensure mantissa has at least
+///     one fractional digit ("4e-41" → "4.0e-41") and the exponent is
+///     signed and zero-padded to >= 2 digits ("1e-6" → "1.0e-06").
+///   * decimal notation (no `e`): ensure a `.` is present ("100" → "100.0").
+///
+/// hmmsearch's summary table emits some values without the `.0` Ruby
+/// expects (e.g. `4e-41` for full-Evalue), so the raw text doesn't match
+/// Ruby's `"4e-41".to_f.to_s == "4.0e-41"`. This pure-string normalizer
+/// closes that gap for the two summary-table columns Ruby reformats
+/// (full-Evalue and full-score), without doing a lossy parse/format
+/// roundtrip.
+fn ruby_format_normalize(s: &str) -> String {
+    if s.is_empty() {
+        return s.to_string();
+    }
+    match s.find('e') {
+        None => {
+            if s.contains('.') {
+                s.to_string()
+            } else {
+                format!("{s}.0")
+            }
+        }
+        Some(e_pos) => {
+            let mantissa_raw = &s[..e_pos];
+            let exp_str = &s[e_pos + 1..];
+            let mantissa = if mantissa_raw.contains('.') {
+                mantissa_raw.to_string()
+            } else {
+                format!("{mantissa_raw}.0")
+            };
+            let (sign, digits) = match exp_str.as_bytes().first().copied() {
+                Some(b'-') => ('-', &exp_str[1..]),
+                Some(b'+') => ('+', &exp_str[1..]),
+                _ => ('+', exp_str),
+            };
+            let padded = if digits.len() < 2 {
+                format!("{digits:0>2}")
+            } else {
+                digits.to_string()
+            };
+            format!("{mantissa}e{sign}{padded}")
+        }
+    }
 }
 
 // ---- range helpers --------------------------------------------------------
@@ -271,9 +329,13 @@ fn pass3_parse_hmmsearch(path: &Path, args: &Args, fa: &FastaStore) -> Result<Pa
         hits: HashMap::new(),
     };
 
-    // inc_gids[gid][hmm] = (full_evalue, full_score) for genes above inclusion
-    // threshold under the current Query.
-    let mut inc_gids: HashMap<String, HashMap<String, (f64, f64)>> = HashMap::new();
+    // inc_gids[gid][hmm] = (full_evalue_f64, full_evalue_str, full_score_str)
+    // for genes above the gene-level inclusion threshold under the current
+    // Query. The f64 is needed to filter against `--gene-evalue`; the
+    // strings are kept verbatim from hmmsearch and used in output, which
+    // matches Ruby exactly (Ruby parses to Float then Float#to_s, which
+    // roundtrips for these well-formed values).
+    let mut inc_gids: HashMap<String, HashMap<String, (f64, String, String)>> = HashMap::new();
 
     let mut flag = "";
     let mut cur_hmm = String::new();
@@ -331,7 +393,7 @@ fn pass3_parse_hmmsearch(path: &Path, args: &Args, fa: &FastaStore) -> Result<Pa
             let pass = inc_gids
                 .get(&cur_gid)
                 .and_then(|h| h.get(&cur_hmm))
-                .map(|(e, _)| *e < args.gene_evalue)
+                .map(|(e, _, _)| *e < args.gene_evalue)
                 .unwrap_or(false);
             flag = if pass { "parse_each" } else { "" };
         } else if flag == "parse_full" && starts_with_indent_digit(&line) {
@@ -347,16 +409,16 @@ fn pass3_parse_hmmsearch(path: &Path, args: &Args, fa: &FastaStore) -> Result<Pa
             if full_e >= args.gene_evalue {
                 continue;
             }
-            let Ok(score) = cols[1].parse::<f64>() else {
-                skipped_rows += 1;
-                debug_assert!(false, "summary row score parse failed: {line:?}");
-                continue;
-            };
+            // Normalize summary-table strings to Ruby's Float#to_s form
+            // (e.g. "4e-41" → "4.0e-41"). Ruby reformats these columns;
+            // pass-through verbatim alone is not enough.
+            let full_e_str = ruby_format_normalize(cols[0]);
+            let score_str = ruby_format_normalize(cols[1]);
             let gid = cols[8].to_string();
             inc_gids
                 .entry(gid)
                 .or_default()
-                .insert(cur_hmm.clone(), (full_e, score));
+                .insert(cur_hmm.clone(), (full_e, full_e_str, score_str));
         } else if flag == "parse_each" && starts_with_indent_digit(&line) {
             // domain table row:
             // " #  ?  score  bias  c-Evalue  i-Evalue hmmfrom  hmmto    alifrom  alito    envfrom  envto    acc"
@@ -396,15 +458,19 @@ fn pass3_parse_hmmsearch(path: &Path, args: &Args, fa: &FastaStore) -> Result<Pa
                 continue;
             }
 
-            // attach full-evalue/full-score for this (gid, cur_hmm)
-            let (fe, fs) = inc_gids
+            // Attach full-evalue/full-score (parsed + verbatim) for this
+            // (gid, cur_hmm). At this point the gid passed the gene-level
+            // filter so an inc_gids entry must exist; if it somehow
+            // doesn't we fall back to zeroes (matches Ruby's `nil*"\t"`).
+            let (fe_f64, fe_str, fs_str) = inc_gids
                 .get(&cur_gid)
                 .and_then(|h| h.get(&cur_hmm))
-                .copied()
-                .unwrap_or((0.0, 0.0));
+                .cloned()
+                .unwrap_or((0.0, "0.0".to_string(), "0.0".to_string()));
             let mut hit = hit;
-            hit.full_evalue = fe;
-            hit.full_score = fs;
+            hit.full_evalue = fe_f64;
+            hit.full_evalue_str = fe_str;
+            hit.full_score = fs_str;
 
             out.hits
                 .entry(cur_gid.clone())
@@ -430,24 +496,28 @@ fn pass3_parse_hmmsearch(path: &Path, args: &Args, fa: &FastaStore) -> Result<Pa
     Ok(out)
 }
 
-/// Parse a domain table row. Returns None if any required numeric column
-/// cannot be parsed; callers should bump a skip counter and continue.
+/// Parse a domain table row. Numeric columns we actually use (i-Evalue
+/// and the four hmm/ali coordinates) must parse; everything else is kept
+/// verbatim. Returns None if any required parse fails; the caller bumps a
+/// skip counter and continues.
 fn parse_domain_row(cols: &[&str], cur_hmm: &str) -> Option<DomainHit> {
     Some(DomainHit {
         hmm: cur_hmm.to_string(),
-        score: cols.get(2)?.parse().ok()?,
-        bias: cols.get(3)?.parse().ok()?,
-        c_evalue: cols.get(4)?.parse().ok()?,
+        score: cols.get(2)?.to_string(),
+        bias: cols.get(3)?.to_string(),
+        c_evalue: cols.get(4)?.to_string(),
+        i_evalue_str: cols.get(5)?.to_string(),
         i_evalue: cols.get(5)?.parse().ok()?,
         hmm_fm: cols.get(6)?.parse().ok()?,
         hmm_to: cols.get(7)?.parse().ok()?,
         ali_fm: cols.get(9)?.parse().ok()?,
         ali_to: cols.get(10)?.parse().ok()?,
-        env_fm: cols.get(12)?.parse().ok()?,
-        env_to: cols.get(13)?.parse().ok()?,
-        acc: cols.get(15)?.parse().ok()?,
+        env_fm: cols.get(12)?.to_string(),
+        env_to: cols.get(13)?.to_string(),
+        acc: cols.get(15)?.to_string(),
         full_evalue: 0.0,
-        full_score: 0.0,
+        full_evalue_str: String::new(),
+        full_score: String::new(),
     })
 }
 
@@ -642,19 +712,16 @@ fn write_outputs(args: &Args, fa: &FastaStore, ph: &ParsedHmmsearch) -> Result<(
                 continue;
             }
 
-            // best-hit row uses merged ali/hmm ranges
-            let mut effective = info.clone();
-            effective.ali_fm = ali_fm;
-            effective.ali_to = ali_to;
-            effective.hmm_fm = hmm_fm;
-            effective.hmm_to = hmm_to;
+            // best-hit row keeps the *original* per-domain hmm.fm/hmm.to/
+            // ali.fm/ali.to of `info`. Ruby uses the merged ranges only for
+            // (a) the linked-length filter above and (b) the region_name.
             let region_name = format!("{gid}_fm{ali_fm}_to{ali_to}");
             write_best_row(
                 &mut fwb,
                 gid,
                 glen,
                 &ginfo,
-                &effective,
+                info,
                 ph,
                 &link_lab,
                 &region_name,
@@ -709,10 +776,10 @@ fn write_all_row<W: Write>(
         "{gid}\t{glen}\t{ginfo}\t{hmm}\t{acc}\t{desc}\t{hlen}\t{score}\t{bias}\t{c}\t{i}\t{hf}\t{ht}\t{af}\t{at}\t{ef}\t{et}\t{ac}\t{fe}\t{fs}",
         gid = gid, glen = glen, ginfo = ginfo,
         hmm = info.hmm, acc = acc, desc = desc, hlen = hmm_len,
-        score = info.score, bias = info.bias, c = info.c_evalue, i = info.i_evalue,
+        score = info.score, bias = info.bias, c = info.c_evalue, i = info.i_evalue_str,
         hf = info.hmm_fm, ht = info.hmm_to, af = info.ali_fm, at = info.ali_to,
         ef = info.env_fm, et = info.env_to, ac = info.acc,
-        fe = info.full_evalue, fs = info.full_score,
+        fe = info.full_evalue_str, fs = info.full_score,
     )?;
     Ok(())
 }
@@ -737,10 +804,10 @@ fn write_best_row<W: Write>(
         "{gid}\t{glen}\t{ginfo}\t{hmm}\t{acc}\t{desc}\t{hlen}\t{score}\t{bias}\t{c}\t{i}\t{hf}\t{ht}\t{af}\t{at}\t{ef}\t{et}\t{ac}\t{fe}\t{fs}\t{link}\t{region}",
         gid = gid, glen = glen, ginfo = ginfo,
         hmm = info.hmm, acc = acc, desc = desc, hlen = hmm_len,
-        score = info.score, bias = info.bias, c = info.c_evalue, i = info.i_evalue,
+        score = info.score, bias = info.bias, c = info.c_evalue, i = info.i_evalue_str,
         hf = info.hmm_fm, ht = info.hmm_to, af = info.ali_fm, at = info.ali_to,
         ef = info.env_fm, et = info.env_to, ac = info.acc,
-        fe = info.full_evalue, fs = info.full_score,
+        fe = info.full_evalue_str, fs = info.full_score,
         link = link, region = region_name,
     )?;
     Ok(())
@@ -763,17 +830,28 @@ fn write_evalue_table(args: &Args, fa: &FastaStore, ph: &ParsedHmmsearch) -> Res
         let mut row: Vec<String> = vec![gid.clone()];
         let per_hmm = ph.hits.get(gid);
         for hmm in &ph.hmm_order {
+            // Mirror the Ruby reference exactly: argsort the i-Evalues to
+            // get r = [original indices sorted ascending], then bidx =
+            // position in r where r[idx] == 0 (= the rank of the
+            // first-encountered domain hit). The emitted value is
+            // i_evalue_str[bidx], NOT min(e). When the first-encountered
+            // hit is also the most significant (the common case) these
+            // coincide, but in other cases we deliberately reproduce the
+            // Ruby behavior so verification stays byte-identical.
             let val = per_hmm
                 .and_then(|h| h.get(hmm))
-                .and_then(|v| {
-                    v.iter().map(|d| d.i_evalue).fold(None, |acc, e| {
-                        Some(match acc {
-                            Some(a) => f64::min(a, e),
-                            None => e,
-                        })
-                    })
+                .map(|v| {
+                    let mut idx: Vec<usize> = (0..v.len()).collect();
+                    idx.sort_by(|&a, &b| {
+                        v[a].i_evalue
+                            .partial_cmp(&v[b].i_evalue)
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+                    let bidx = idx.iter().position(|&i| i == 0).unwrap_or(0);
+                    // Ruby reformats evalues here via Float#to_s, so we
+                    // run the same string-level normalization.
+                    ruby_format_normalize(&v[bidx].i_evalue_str)
                 })
-                .map(|x| format!("{x:e}"))
                 .unwrap_or_default();
             row.push(val);
         }
@@ -842,6 +920,27 @@ mod tests {
     }
 
     #[test]
+    fn ruby_format_normalize_matches_ruby_to_s() {
+        // Adds .0 to integer mantissa in scientific notation.
+        assert_eq!(ruby_format_normalize("4e-41"), "4.0e-41");
+        assert_eq!(ruby_format_normalize("3e-34"), "3.0e-34");
+        // Pads exponent to two digits.
+        assert_eq!(ruby_format_normalize("1e-6"), "1.0e-06");
+        assert_eq!(ruby_format_normalize("2.6e-7"), "2.6e-07");
+        // Already canonical — pass through.
+        assert_eq!(ruby_format_normalize("4.4e-41"), "4.4e-41");
+        assert_eq!(ruby_format_normalize("1.0e-06"), "1.0e-06");
+        // Positive exponent gets explicit +.
+        assert_eq!(ruby_format_normalize("1e16"), "1.0e+16");
+        // Decimal with `.` passes through.
+        assert_eq!(ruby_format_normalize("0.0083"), "0.0083");
+        // Integer-valued decimal gets `.0`.
+        assert_eq!(ruby_format_normalize("100"), "100.0");
+        // Empty stays empty.
+        assert_eq!(ruby_format_normalize(""), "");
+    }
+
+    #[test]
     fn starts_with_indent_digit_handles_summary_rows() {
         assert!(starts_with_indent_digit("    4.6e-12   51.2"));
         assert!(starts_with_indent_digit("\t  3 0.5"));
@@ -860,19 +959,25 @@ mod tests {
         ];
         let h = parse_domain_row(&cols, "MyHmm").expect("should parse");
         assert_eq!(h.hmm, "MyHmm");
-        assert_eq!(h.score, 51.2);
+        assert_eq!(h.score, "51.2");
+        assert_eq!(h.bias, "0.4");
+        assert_eq!(h.c_evalue, "1e-12");
+        assert_eq!(h.i_evalue_str, "6.3e-12");
+        assert_eq!(h.i_evalue, 6.3e-12);
         assert_eq!(h.hmm_fm, 1);
         assert_eq!(h.hmm_to, 40);
         assert_eq!(h.ali_fm, 16);
         assert_eq!(h.ali_to, 57);
-        assert_eq!(h.acc, 0.79);
+        assert_eq!(h.env_fm, "5");
+        assert_eq!(h.env_to, "74");
+        assert_eq!(h.acc, "0.79");
     }
 
     #[test]
     fn parse_domain_row_returns_none_on_malformed() {
         let cols = [
-            "1", "?", "abc", "0.4", "x", "y", "1", "40", "..", "16", "57", "..", "5", "74", "..",
-            "0.79",
+            "1", "?", "51.2", "0.4", "1e-12", "abc", // i-Evalue not parseable
+            "1", "40", "..", "16", "57", "..", "5", "74", "..", "0.79",
         ];
         assert!(parse_domain_row(&cols, "MyHmm").is_none());
         let short = ["1", "?", "51.2"]; // not enough cols
