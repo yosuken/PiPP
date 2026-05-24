@@ -1,5 +1,5 @@
-### test data (large fixtures); test code under test/1/ is NOT ignored
-/test/example1/
+### test directory (large fixtures + unimplemented Minitest scaffolds)
+/test/
 
 ### bundle related files
 # /vendor/

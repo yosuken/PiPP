@@ -16,7 +16,7 @@ PiPP (Pipeline for Phylogenetic Placement) is a bioinformatics tool for phylogen
 ./ci/run.sh smoke       # only the pipp_util import smoke test
 ```
 
-There is no `rake test` target — Minitest scaffolds under `test/1/` are not implemented.
+There is no `rake test` target. The whole `test/` directory is gitignored (it holds large local fixtures plus unimplemented Minitest scaffolds); automated tests live in `cargo test` and `ci/`.
 
 ### Building the bundled Rust binary
 ```bash
