@@ -1,66 +1,62 @@
 
-# {{{ example
-### [witch-ng input]
-# >WP_091443104.1
-# ---------------------------------------------------------------M--------------------------------P-LGLYDVVQFAILGAGFALLAYFLYSLTSRDEVS-----AR-YRPSSYAALCLAAVATV-AYLLLYLD------WD-------------------S-------GF--R-L-----E---D--------------------------------------------------------GVY--------------------V-P--------NEE--A--------------R-----T---T-----EGTRYI-DW----SITVPLLTVELLAVCSV--T-G-AAA-R---------RLRSS--------TMAAAFLMIVTGYLGA---Q------V---L----------------D------Q------GR---DR------L--------A----------L---------V-------V---W-----GLI--STAFFA-------YLYVALI--------------GAVRRSLPTM---------G-P-EA---AVSLRNATIV--LLSSFGVYPLVYA----V--------P-V--------------F---------A----------DV----------T--------P-----------A------------W-------F----T-----AMQVGYSAADVVAKIGFGVLVHKVAKLRTAED
-
-### [witch-ng output]
-# >WP_091443104.1
-# ----------------------------------------------------------------M--------------------------------P-LGLYDVVQFAILGAGFALLAYFLYSLTSRDEVS-----AR-YRPSSYAALCLAAVATV-AYLLLYLD------WD-------------------S-------GF--R-L-----E---D--------------------------------------------------------GVY--------------------V-P--------NEE--A--------------R-----T---T-----EGTRYI-DW----SITVPLLTVELLAVCSV--T-G-AAA-R---------RLRSS--------TMAAAFLMIVTGYLGA---Q------V---L----------------D------Q------GR---DR------L--------A----------L---------V-------V---W-----GLI--STAFFA-------YLYVALI--------------GAVRRSLPTM---------G-P-EA---AVSLRNATIV--LLSSFGVYPLVYA----V--------P-V--------------F---------A----------DV----------T--------P-----------A------------W-------F----T-----AMQVGYSAADVVAKIGFGVLVHKVAKLRTAED-
-# }}}
+# Extract, from a witch-ng output alignment, only the columns that correspond
+# to the reference (backbone) alignment — witch-ng sometimes adds query
+# insertion columns, making its output wider than the backbone.
+#
+# Columns are identified by content: a backbone column is the string of
+# residues across the backbone sequences; the matching output column has the
+# identical string. The backbone sequences are located in the output BY NAME
+# (not by position), because witch-ng may emit them in a different order
+# (e.g. when reusing a prebuilt eHMM via `-b <ehmm-dir>`).
 
 faln, fin, fout = ARGV
 
-N_check = 10000 ### compare between alignments using first N_check sequences
+N_check = 10000 ### compare using at most this many backbone sequences
 
-aln0 = []
-open(faln){ |fr|
-  ### refpkg alignment
-  j = 0
-  while l = fr.gets
-    if l[0] == ">"
-      j += 1
-      break if j > N_check
-    else
-      ### sequence should be on a single line
-      str = l.strip # read second line (should be the first sequence, not partial)
-      (0..str.size-1).each{ |i|
-        aln0[i] ||= []
-        aln0[i] << str[i]
-      }
+# {{{ def read_fasta(path)  -> [ordered_names, name=>seq] (single or multi-line)
+def read_fasta(path)
+  order = []
+  seq   = {}
+  cur   = nil
+  open(path){ |fr|
+    while l = fr.gets
+      if l[0] == ">"
+        cur = l.strip[1..-1].split(/\s+/)[0]
+        order << cur
+        seq[cur] = +""
+      elsif cur
+        seq[cur] << l.strip
+      end
     end
-  end
-} 
+  }
+  [order, seq]
+end
+# }}}
 
-aln0 = aln0.map{ |x| x.join("") }
-L = aln0.size
-N = aln0[0].size ### min(N_check, number of sequences in the alignment)
+### backbone alignment
+bb_order, bb_seq = read_fasta(faln)
+bb_order = bb_order.first(N_check)
+N = bb_order.size
+L = bb_seq[bb_order[0]].size
 
-aln1 = []
-open(fin){ |fr|
-  ### witch-ng alignment
-  j = 0
-  while l = fr.gets
-    if l[0] == ">"
-      j += 1
-      break if j > N
-    else
-      ### sequence should be on a single line
-      str = l.strip # read second line (should be the first sequence, not partial)
-      (0..str.size-1).each{ |i|
-        aln1[i] ||= []
-        aln1[i] << str[i]
-      }
-    end
-  end
+### witch-ng output (indexed by name so sequence order does not matter)
+_out_order, out_seq = read_fasta(fin)
+
+### the same backbone sequences, taken from the output by name, in backbone order
+out_bb = bb_order.map{ |nm|
+  out_seq[nm] or raise("Error: backbone sequence #{nm} not found in witch-ng output #{fin}")
 }
-aln1 = aln1.map{ |x| x.join("") }
-L1 = aln1.size
-N1 = aln1[0].size ### min(N_check, number of sequences in the alignment)
-raise("Error: unexpected alignment. number of sequences in input alignment (#{N}) and witch-ng output (#{N1}) should be the same") if N != N1
-# p ["N", N, "N1", N1, "L", L, "L1", L1]
+N1 = out_bb.size
+L1 = out_bb[0].size
+raise("Error: unexpected alignment. number of backbone sequences in input alignment (#{N}) and witch-ng output (#{N1}) should be the same") if N != N1
 
-conv = {} ### aln1 position -> aln0 position
+### columns as strings (over the backbone sequences, backbone order)
+aln0 = (0...L).map{ |i| bb_order.map{ |nm| bb_seq[nm][i] }.join }
+aln1 = (0...L1).map{ |i| out_bb.map{ |s| s[i] }.join }
+
+### map each output column to a backbone column (monotonic; backbone columns
+### appear in order, separated by query-insertion columns)
+conv = {} ### aln1 (output) position -> aln0 (backbone) position
 k = 0
 (0..L1-1).each{ |i|
   (k..L-1).each{ |j|
@@ -72,16 +68,14 @@ k = 0
   }
 }
 
-### now conv is built
-### find first position in aln1 that matches aln0[0]
-
-# p conv
 if conv.size != L
   raise("Error: only #{conv.size} positions could be mapped out of #{L}, when parsing #{faln} and #{fin}")
 end
 
-pos1 = conv.keys
-open(fout, "w"){ |fw| 
+pos1 = conv.keys ### output column indices that correspond to backbone columns (ascending)
+
+### write every output sequence, keeping only the backbone-corresponding columns
+open(fout, "w"){ |fw|
   open(fin){ |fr|
     while l = fr.gets
       if l[0] == ">"

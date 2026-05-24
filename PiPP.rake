@@ -601,11 +601,50 @@ task "01-3b.witch-ng", ["step"] do |t, args|
   script1 = "#{__dir__}/script/UO2X.rb" ## "U" --> "X" in aligned fasta
   script2 = "#{__dir__}/script/only_query.rb" ## "U" --> "X" in aligned fasta
 
+  ### [eHMM cache] witch-ng decomposes the backbone MSA+tree into eHMMs, which
+  ### is query-independent and the slow part. Build it once per refpkg and
+  ### reuse via `-b <ehmm-dir>` for every chunk and every run. The cache lives
+  ### under <refpkg>/derived/witch_ehmm/lb<N>/ (keyed by --hmm-size-lb so
+  ### different values don't collide); if the refpkg dir is not writable it
+  ### falls back to a per-run copy under chunks/ (no cross-run reuse).
+  ### Source changes invalidate it because 01-1b wipes <refpkg>/derived.
+  pkg2ehmm = {}
+  prep     = []
+  $fpkgs.each{ |pkg|
+    next if Dir["#{Cnkdir}/#{pkg[:name]}/chunk/chunk_*.fasta"].size == 0
+
+    deriv = "#{pkg[:refpkg]}/derived"
+    base  = (File.directory?(deriv) && File.writable?(deriv)) ? deriv : "#{Cnkdir}/#{pkg[:name]}"
+    ehmm  = "#{base}/witch_ehmm/lb#{HmmSizeLb}"
+    mark  = "#{ehmm}.complete"
+    pkg2ehmm[pkg[:name]] = ehmm
+    next if File.exist?(mark) ### already built for this lb
+
+    ### dummy query (first backbone sequence, ungapped) to trigger eHMM build
+    ddir  = "#{Cnkdir}/#{pkg[:name]}"; mkdir_p ddir
+    dummy = "#{ddir}/ehmm_build.dummy.fa"
+    ent   = IO.read(pkg[:faln]).split(/^>/)[1]
+    lab, *seq = ent.split("\n"); gid = lab.split(/\s+/)[0]
+    open(dummy, "w"){ |fw| fw.puts ">#{gid}"; fw.puts seq.join.gsub(/[-.]/, "") }
+    thro  = "#{ddir}/ehmm_build.throwaway.fa"
+    blog  = "#{ddir}/ehmm_build.log"
+    mkdir_p File.dirname(ehmm)
+    prep << "rm -rf #{ehmm} && RUST_BACKTRACE=full #{WITCH_NG} add --threads #{NcpuP} --hmm-size-lb #{HmmSizeLb} -e #{ehmm} -b #{pkg[:faln]} -t #{pkg[:ftre]} -i #{dummy} -o #{thro} >#{blog} 2>&1 && touch #{mark}"
+  }
+
+  ### build the eHMM caches (parallel across refpkgs) before aligning chunks
+  unless prep.empty?
+    pdir = "#{Jobdir}/01-3b.witch-ng.ehmm"; mkdir_p pdir
+    pscr = "#{pdir}/build_ehmm.sh"; open(pscr, "w"){ |fw| fw.puts prep }
+    sh "TMPDIR=#{pdir} parallel --jobs #{Npara} <#{pscr}"
+  end
+
   $fpkgs.each{ |pkg|
     fas = Dir["#{Cnkdir}/#{pkg[:name]}/chunk/chunk_*.fasta"].sort_by{ |i| File.basename(i).gsub(/^chunk_/, "").gsub(/\.fasta$/, "").to_i }
     next if fas.size == 0
 
     ### [!!!] faln should be nonredundant (sequences are same as tree) --> TODO: validation process
+    ehmm = pkg2ehmm[pkg[:name]]
 
     fas.each{ |fa|
       chnk  = File.basename(fa).gsub(/\.fasta$/, "") ## chunk_0, chunk_1, ...
@@ -616,9 +655,10 @@ task "01-3b.witch-ng", ["step"] do |t, args|
       ftmp1 = "#{odir}/witch-ng.UO2X.fa" ## used only by pplacer ('U' --> 'X')
       ftmp2 = "#{odir}/witch-ng.UO2X.only_query.fa"
 
-      # witch-ng add --threads 4 -i queries.fa -b backbone.afa -t backbone.tre -o extended_alignment.afa
+      # witch-ng add --threads 4 -i queries.fa -b <ehmm-dir> -o extended_alignment.afa
+      # (eHMMs are prebuilt above, so no -t / --hmm-size-lb here)
       out   = []
-      out  << "RUST_BACKTRACE=full #{WITCH_NG} add --threads #{NcpuP} --hmm-size-lb #{HmmSizeLb} -i #{fa} -b #{pkg[:faln]} -t #{pkg[:ftre]} -o #{ftmp0} >#{flog} 2>&1" ## compatible with "U"
+      out  << "RUST_BACKTRACE=full #{WITCH_NG} add --threads #{NcpuP} -i #{fa} -b #{ehmm} -o #{ftmp0} >#{flog} 2>&1" ## compatible with "U"
       out  << "ruby #{script0} #{pkg[:faln]} #{ftmp0} #{fout}" ### extract region of the input alignment, since witch-ng output is sometimes longer than input
       out  << "ruby #{script1} #{fout} #{ftmp1}"
       out  << "ruby #{script2} #{pkg[:faln]} #{ftmp1} #{ftmp2}"
