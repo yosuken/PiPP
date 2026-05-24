@@ -659,7 +659,7 @@ task "01-3b.witch-ng", ["step"] do |t, args|
       # (eHMMs are prebuilt above, so no -t / --hmm-size-lb here)
       out   = []
       out  << "RUST_BACKTRACE=full #{WITCH_NG} add --threads #{NcpuP} -i #{fa} -b #{ehmm} -o #{ftmp0} >#{flog} 2>&1" ## compatible with "U"
-      out  << "ruby #{script0} #{pkg[:faln]} #{ftmp0} #{fout}" ### extract region of the input alignment, since witch-ng output is sometimes longer than input
+      out  << "ruby #{script0} #{pkg[:faln]} #{fa} #{ftmp0} #{fout}" ### extract backbone columns AND reorder to canonical order (backbone then query); witch-ng output is sometimes longer/reordered
       out  << "ruby #{script1} #{fout} #{ftmp1}"
       out  << "ruby #{script2} #{pkg[:faln]} #{ftmp1} #{ftmp2}"
       outs << out*" && "

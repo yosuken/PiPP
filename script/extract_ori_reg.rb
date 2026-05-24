@@ -1,48 +1,57 @@
 
-# Extract, from a witch-ng output alignment, only the columns that correspond
-# to the reference (backbone) alignment — witch-ng sometimes adds query
-# insertion columns, making its output wider than the backbone.
+# Post-process a witch-ng output alignment:
+#   (1) keep only the columns that correspond to the reference (backbone)
+#       alignment — witch-ng adds query insertion columns, making its output
+#       wider than the backbone;
+#   (2) emit the sequences in a deterministic, canonical order — backbone
+#       sequences in backbone.mfa order, then query sequences in the chunk
+#       input order. witch-ng reorders its output (especially when reusing a
+#       prebuilt eHMM via `-b <ehmm-dir>`), so without this the official
+#       output order would depend on the eHMM cache; reordering makes it
+#       identical regardless.
 #
-# Columns are identified by content: a backbone column is the string of
-# residues across the backbone sequences; the matching output column has the
-# identical string. The backbone sequences are located in the output BY NAME
-# (not by position), because witch-ng may emit them in a different order
-# (e.g. when reusing a prebuilt eHMM via `-b <ehmm-dir>`).
+# usage: ruby extract_ori_reg.rb <backbone.mfa> <chunk.fasta> <witch-ng.out> <out.fa>
 
-faln, fin, fout = ARGV
+faln, fque, fin, fout = ARGV
 
 N_check = 10000 ### compare using at most this many backbone sequences
 
-# {{{ def read_fasta(path)  -> [ordered_names, name=>seq] (single or multi-line)
+# {{{ def read_fasta(path) -> [ordered_names, name=>seq, name=>header_after_gt]
 def read_fasta(path)
   order = []
   seq   = {}
+  hdr   = {}
   cur   = nil
   open(path){ |fr|
     while l = fr.gets
       if l[0] == ">"
-        cur = l.strip[1..-1].split(/\s+/)[0]
+        h   = l.strip[1..-1]
+        cur = h.split(/\s+/)[0]
         order << cur
         seq[cur] = +""
+        hdr[cur] = h
       elsif cur
         seq[cur] << l.strip
       end
     end
   }
-  [order, seq]
+  [order, seq, hdr]
 end
 # }}}
 
 ### backbone alignment
-bb_order, bb_seq = read_fasta(faln)
+bb_order, bb_seq, = read_fasta(faln)
 bb_order = bb_order.first(N_check)
 N = bb_order.size
 L = bb_seq[bb_order[0]].size
 
-### witch-ng output (indexed by name so sequence order does not matter)
-_out_order, out_seq = read_fasta(fin)
+### query order (chunk input order)
+q_order, = read_fasta(fque)
 
-### the same backbone sequences, taken from the output by name, in backbone order
+### witch-ng output (indexed by name; its own order is ignored)
+_out_order, out_seq, out_hdr = read_fasta(fin)
+
+### same backbone sequences taken from the output by name, in backbone order
 out_bb = bb_order.map{ |nm|
   out_seq[nm] or raise("Error: backbone sequence #{nm} not found in witch-ng output #{fin}")
 }
@@ -54,8 +63,7 @@ raise("Error: unexpected alignment. number of backbone sequences in input alignm
 aln0 = (0...L).map{ |i| bb_order.map{ |nm| bb_seq[nm][i] }.join }
 aln1 = (0...L1).map{ |i| out_bb.map{ |s| s[i] }.join }
 
-### map each output column to a backbone column (monotonic; backbone columns
-### appear in order, separated by query-insertion columns)
+### map each output column to a backbone column (monotonic)
 conv = {} ### aln1 (output) position -> aln0 (backbone) position
 k = 0
 (0..L1-1).each{ |i|
@@ -74,16 +82,12 @@ end
 
 pos1 = conv.keys ### output column indices that correspond to backbone columns (ascending)
 
-### write every output sequence, keeping only the backbone-corresponding columns
+### write in canonical order: backbone (backbone order), then queries (chunk order),
+### keeping only the backbone-corresponding columns.
 open(fout, "w"){ |fw|
-  open(fin){ |fr|
-    while l = fr.gets
-      if l[0] == ">"
-        fw.puts l
-      else
-        seq = l.strip.split(//)
-        fw.puts seq.values_at(*pos1).join("")
-      end
-    end
+  (bb_order + q_order).each{ |nm|
+    s = out_seq[nm] or raise("Error: sequence #{nm} not found in witch-ng output #{fin}")
+    fw.puts ">#{out_hdr[nm]}"
+    fw.puts pos1.map{ |i| s[i] }.join("")
   }
 }
