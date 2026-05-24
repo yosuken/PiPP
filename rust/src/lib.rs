@@ -4,6 +4,7 @@
 //! and helpers live here so they can be unit/integration tested without
 //! shelling out to the binary.
 
+pub mod cmd_clamp_jplace;
 pub mod cmd_import;
 pub mod cmd_parse_hmmsearch;
 pub mod cmd_validate_query;

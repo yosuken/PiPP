@@ -20,7 +20,11 @@ name = File.basename(rpkg)
 ### derived files are regenerated into odir every run (original behavior).
 derived  = "#{rpkg}/derived"
 key_file = "#{derived}/SOURCE.md5"
-src_key  = [falnO, ftreO, fhmmO].map{ |f| Digest::MD5.file(f).to_s }.join("-")
+### Bump DERIV_VERSION whenever generate_derived's logic changes so existing
+### caches are invalidated even though the source files are unchanged.
+###   v2: clamp negative branch lengths in the min-evo tree (apples-2 NaN fix)
+DERIV_VERSION = "2"
+src_key  = ([DERIV_VERSION] + [falnO, ftreO, fhmmO].map{ |f| Digest::MD5.file(f).to_s }).join("-")
 
 cache_valid = File.exist?(key_file) && File.read(key_file).strip == src_key
 
@@ -76,6 +80,12 @@ def generate_derived(odir, falnO, ftreO, fhmmO, ftaxO, fposO,
   mkdir_p apdir unless Dir.exist?(apdir)
   puts "### Generating minimum evolution distanced tree using FastTree for APPLES-2..."
   sh "FastTree -nosupport -nome -noml -log #{flogME} -intree #{ftre} < #{faln} > #{ftreME} 2> #{ferrME}"
+  ### Clamp negative branch lengths (least-squares artifacts) to 0. On trees
+  ### with negative branches APPLES-2 can emit NaN pendant lengths, producing
+  ### a jplace that is invalid JSON and unparseable by gappa. (The output
+  ### jplace tree is additionally clamped by `pipp_util clamp-jplace`.)
+  me_tree = File.read(ftreME)
+  File.write(ftreME, me_tree.gsub(/:-[0-9.eE+-]+/, ":0"))
   puts ""
 
   ### gamma tree (FastTree) + taxtastic package for pplacer (used only when input tree is IQTREE)

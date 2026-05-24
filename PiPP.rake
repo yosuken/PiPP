@@ -777,6 +777,10 @@ task "01-3c.apples-2", ["step"] do |t, args|
       flog  = "#{odir}/apples-2.log"
       fout  = "#{odir}/#{File.basename(fa).gsub(/\.fa$/, "")}.jplace"
 
+      ### apples-2 places onto a minimum-evolution tree. The resulting jplace
+      ### is sanitized (non-finite values + negative branch lengths) after
+      ### unchunkify in 01-3d, where gappa prepare unchunkify can introduce
+      ### -nan pendant lengths.
       outs << "run_apples.py -T #{NcpuP} -o #{fout} -s #{pkg[:faln]} -t #{pkg[:ftreME]} -x #{fa} >#{flog} 2>&1"
     }
   }
@@ -836,7 +840,14 @@ task "01-3d.unchunkify", ["step"] do |t, args|
     odir  = "#{Resdir}/#{pkg[:name]}/placement"; mkdir_p odir
     flog  = "#{odir}/unchunkify.log"
 
-    outs << "#{cmd1} --out-dir #{odir} --abundances-path #{fabus} --jplace-path #{fplcs} >#{flog} 2>&1"
+    cmd = "#{cmd1} --out-dir #{odir} --abundances-path #{fabus} --jplace-path #{fplcs} >#{flog} 2>&1"
+    ### apples-2 jplace can carry -nan (introduced here by gappa unchunkify)
+    ### and negative branch lengths; sanitize so the downstream gappa steps
+    ### (01-4a info, lwr-list, assign, graft) can parse it.
+    if Placer == "apples-2"
+      cmd += %{ && for j in #{odir}/*.jplace; do #{PIPP_UTIL} clamp-jplace "$j" >>#{flog} 2>&1; done}
+    end
+    outs << cmd
   }
 
   WriteBatch.call(t, Jobdir, outs)
