@@ -80,7 +80,7 @@ External tools required:
 The pipeline accepts extensive command-line configuration including:
 - E-value thresholds for prefiltering (`-e`, `--evaluedom`)
 - Aligner choice (`witch-ng` (default) or `mafft-add`)
-- Placer choice (`pplacer` (default), `apples-2`, `epa-ng`)
+- Placer choice (`apples-2` (default), `pplacer`, `epa-ng`)
 - Chunk sizes for parallelization (`-c`)
 
 ## Development Notes

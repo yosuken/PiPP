@@ -48,7 +48,7 @@ class PiPP
       # trim_option: "merge",
       
       # Placer
-      placer: "pplacer",
+      placer: "apples-2",
 
       # Aligner
       aligner: "witch-ng",
@@ -211,7 +211,7 @@ class PiPP
       # {{{ Placement options
       opts.on("\n[Placement]")
 
-      opts.on("--placer OPTION", ["pplacer", "apples-2", "epa-ng"], "query sequence aligner (default: pplacer) [pplacer|apples-2|epa-ng]") do |v|
+      opts.on("--placer OPTION", ["pplacer", "apples-2", "epa-ng"], "phylogenetic placement tool (default: apples-2) [pplacer|apples-2|epa-ng]") do |v|
         @options[:placer] = v
       end
 
