@@ -595,7 +595,20 @@ task "01-3b.witch-ng", ["step"] do |t, args|
   (puts "Already done. Skipped." ; next) if File.exist?("#{Logdir}/#{t.name.split(":")[-1]}/exit") ### skip if already done
   outs = []
 
-  HmmSizeLb = 100 ### default: 10 (it may take long time.)
+  ### witch-ng eHMM decomposition size lower bound.
+  ### --hmm-size-lb (ENV hmm_size_lb) overrides; otherwise it is computed per
+  ### refpkg as round(backbone leaf count / 20), so the decomposition yields a
+  ### bounded number of leaf subsets (~20) regardless of backbone size.
+  hmm_size_lb_opt = (ENV["hmm_size_lb"] || "").strip ### "" = auto
+  lb_of = lambda{ |pkg|
+    if hmm_size_lb_opt.empty?
+      nleaf = 0
+      IO.foreach(pkg[:faln]){ |l| nleaf += 1 if l.start_with?(">") }
+      [(nleaf / 20.0).round, 2].max
+    else
+      hmm_size_lb_opt.to_i
+    end
+  }
 
   script0 = "#{__dir__}/script/extract_ori_reg.rb" ## extract region of the input alignment, since witch-ng output is sometimes longer than input
   script1 = "#{__dir__}/script/UO2X.rb" ## "U" --> "X" in aligned fasta
@@ -613,9 +626,10 @@ task "01-3b.witch-ng", ["step"] do |t, args|
   $fpkgs.each{ |pkg|
     next if Dir["#{Cnkdir}/#{pkg[:name]}/chunk/chunk_*.fasta"].size == 0
 
+    lb    = lb_of.call(pkg)
     deriv = "#{pkg[:refpkg]}/derived"
     base  = (File.directory?(deriv) && File.writable?(deriv)) ? deriv : "#{Cnkdir}/#{pkg[:name]}"
-    ehmm  = "#{base}/witch_ehmm/lb#{HmmSizeLb}"
+    ehmm  = "#{base}/witch_ehmm/lb#{lb}"
     mark  = "#{ehmm}.complete"
     pkg2ehmm[pkg[:name]] = ehmm
     next if File.exist?(mark) ### already built for this lb
@@ -629,7 +643,7 @@ task "01-3b.witch-ng", ["step"] do |t, args|
     thro  = "#{ddir}/ehmm_build.throwaway.fa"
     blog  = "#{ddir}/ehmm_build.log"
     mkdir_p File.dirname(ehmm)
-    prep << "rm -rf #{ehmm} && RUST_BACKTRACE=full #{WITCH_NG} add --threads #{NcpuP} --hmm-size-lb #{HmmSizeLb} -e #{ehmm} -b #{pkg[:faln]} -t #{pkg[:ftre]} -i #{dummy} -o #{thro} >#{blog} 2>&1 && touch #{mark}"
+    prep << "rm -rf #{ehmm} && RUST_BACKTRACE=full #{WITCH_NG} add --threads #{NcpuP} --hmm-size-lb #{lb} -e #{ehmm} -b #{pkg[:faln]} -t #{pkg[:ftre]} -i #{dummy} -o #{thro} >#{blog} 2>&1 && touch #{mark}"
   }
 
   ### build the eHMM caches (parallel across refpkgs) before aligning chunks

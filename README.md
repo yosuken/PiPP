@@ -120,6 +120,7 @@ $ PiPP [options] -q <query fasta> -r <refpkg dir(s)> -o <output dir>
 [Alignment]
         --aligner OPTION             query sequence aligner (default: witch-ng)
         --mafft-method METHOD        MAFFT add method (default: E-INS-i)
+        --witch-ng-hmm-size-lb INT   witch-ng eHMM decomposition size lower bound (default: backbone leaf count / 20)
 
 [Placement]
         --placer OPTION              phylogenetic placement tool (default: apples-2) [pplacer|apples-2|epa-ng]

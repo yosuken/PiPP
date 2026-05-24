@@ -56,6 +56,9 @@ class PiPP
       # Alignment options
       mafft_method: "E-INS-i",
 
+      # witch-ng HMM decomposition size lower bound (nil = auto: backbone leaf count / 20)
+      hmm_size_lb: nil,
+
       # EPA-ng model (only when --placer epa-ng is selected)
       epa_ng_model: nil,
       
@@ -205,6 +208,11 @@ class PiPP
       opts.on("--mafft-method METHOD", ["E-INS-i", "FFT-NS-i", "FFT-NS-2", "FFT-NS-i_addfragments", "FFT-NS-2_addfragments"],
         "MAFFT add method (default: E-INS-i)") do |v|
         @options[:mafft_method] = v
+      end
+
+      opts.on("--witch-ng-hmm-size-lb INT", Integer,
+        "witch-ng eHMM decomposition size lower bound (default: backbone leaf count / 20)") do |v|
+        @options[:hmm_size_lb] = v
       end
       # }}}
       
@@ -429,6 +437,7 @@ class PiPP
       "placer"         => @options[:placer],
       "aligner"        => @options[:aligner],
       "mafft_method"   => @options[:mafft_method],
+      "hmm_size_lb"    => @options[:hmm_size_lb] ? @options[:hmm_size_lb].to_s : "",
       "epa_ng_model"   => @options[:epa_ng_model],
       "extract_levels" => @options[:extract_levels],
       "chunk_size"     => @options[:chunk_size].to_s,
