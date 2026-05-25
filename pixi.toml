@@ -1,0 +1,44 @@
+[workspace]
+authors = ["Yosuke Nishimura <godblessyou317@gmail.com>"]
+channels = ["conda-forge", "bioconda"]
+name = "PiPP_v0.4.0"
+platforms = ["linux-64"]
+version = "0.1.0"
+# pplacer/fasttree deps vs latest conda-forge don't co-solve under strict
+# priority (same reason install.sh uses --channel-priority flexible).
+channel-priority = "disabled"
+
+# point PiPP at the bundled binary so `pixi run PiPP` finds pipp_util
+# regardless of cwd (build it with `pixi run -e build build`).
+[activation.env]
+PIPP_UTIL_BIN = "/lustre/aptmp/yosuke/dev/tool/PiPP/rust/target/release/pipp_util"
+
+[tasks]
+
+[dependencies]
+ruby = ">=3"     # validated on 3.4 and 4.0 (syntax + stdlib/rake load clean)
+hmmer = ">=3.0"
+mafft = ">=7.453"
+gappa = ">=0.6"
+pplacer = ">=1.1.alpha22"
+parallel = "*"
+fasttree = "*"
+epa-ng = "*"
+python = ">=3.10"
+pip = "*"
+
+[pypi-dependencies]
+setuptools = "<81"   # apples 2.0.11 imports pkg_resources (removed in setuptools 81+)
+apples = "*"
+taxtastic = "*"
+
+# build-time only: Rust toolchain to compile pipp_util. Isolated in its own
+# environment (no bio tools, no co-solve with the runtime deps).
+[feature.build.dependencies]
+rust = ">=1.70"
+
+[feature.build.tasks]
+build = "cargo build --release --manifest-path rust/Cargo.toml"
+
+[environments]
+build = { features = ["build"], no-default-feature = true }

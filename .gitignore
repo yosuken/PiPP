@@ -44,3 +44,6 @@ __pycache__/
 ### local-only dev tooling
 /.filenum/
 /.ruby-lsp/
+# pixi environments
+.pixi/*
+!.pixi/config.toml
