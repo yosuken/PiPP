@@ -26,6 +26,20 @@ pub struct Args {
     #[arg(long = "run-json")]
     pub run_json: Option<PathBuf>,
 
+    /// HMM name of this refpkg (the hmmsearch model NAME). Used to select the
+    /// rows of the shared prefilter outputs that belong to this refpkg.
+    #[arg(long = "hmm-name")]
+    pub hmm_name: Option<String>,
+
+    /// prefilter best-hit.tsv (shared across refpkgs; filtered by --hmm-name).
+    #[arg(long = "besthit-tsv")]
+    pub besthit_tsv: Option<PathBuf>,
+
+    /// prefilter evalues.tsv (seq x hmm matrix; only this refpkg's column,
+    /// non-empty cells, is kept).
+    #[arg(long = "evalues")]
+    pub evalues: Option<PathBuf>,
+
     /// Overwrite an existing DB file
     #[arg(long)]
     pub overwrite: bool,
@@ -146,6 +160,37 @@ pub fn run(args: Args) -> Result<()> {
         }
     }
 
+    // query sequences (under result_dir, persist by default): whole protein and
+    // aligned (gapped) query. region sequences are a view over query_whole +
+    // prefilter_hits; the full alignment is query_aligned + refpkg backbone.
+    let whole_fa = result_dir.join("seq/whole.fa");
+    if whole_fa.is_file() {
+        let n = import_fasta(&conn, "query_whole", &refpkg, &whole_fa)?;
+        eprintln!("imported {n} rows into query_whole");
+    }
+    let aln_fa = result_dir.join("alignment/aligned_wo_ref.fa");
+    if aln_fa.is_file() {
+        let n = import_fasta(&conn, "query_aligned", &refpkg, &aln_fa)?;
+        eprintln!("imported {n} rows into query_aligned");
+    }
+
+    // prefilter outputs (shared across refpkgs; selected by this refpkg's HMM).
+    if let Some(tsv) = &args.besthit_tsv {
+        if tsv.is_file() {
+            let hmm_name = args.hmm_name.as_deref();
+            let (nh, accs) = import_prefilter_hits(&conn, &refpkg, hmm_name, tsv)?;
+            eprintln!("imported {nh} rows into prefilter_hits");
+            if let Some(ev) = &args.evalues {
+                if ev.is_file() {
+                    let ne = import_prefilter_evalues(&conn, &refpkg, hmm_name, &accs, ev)?;
+                    eprintln!("imported {ne} rows into prefilter_evalues");
+                }
+            }
+        } else {
+            eprintln!("skip prefilter_hits: {} not found", tsv.display());
+        }
+    }
+
     eprintln!("wrote {}", db_path.display());
     Ok(())
 }
@@ -220,6 +265,146 @@ fn import_run_json(conn: &Connection, refpkg: &str, json_path: &Path) -> Result<
         app.flush()?;
     }
     Ok((np, ns))
+}
+
+/// Build a header-name -> column-index map for a TSV header record.
+fn header_index(header: &csv::StringRecord) -> std::collections::HashMap<String, usize> {
+    header
+        .iter()
+        .enumerate()
+        .map(|(i, h)| (h.to_string(), i))
+        .collect()
+}
+
+/// Import a FASTA file as (refpkg, id, sequence) rows into `table`.
+fn import_fasta(conn: &Connection, table: &str, refpkg: &str, path: &Path) -> Result<usize> {
+    let text =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    let mut app = conn.appender(table)?;
+    let mut n = 0usize;
+    let mut id: Option<String> = None;
+    let mut seq = String::new();
+    for line in text.lines() {
+        if let Some(h) = line.strip_prefix('>') {
+            if let Some(rid) = id.take() {
+                app.append_row(params![refpkg, rid, seq.as_str()])?;
+                n += 1;
+            }
+            seq.clear();
+            id = Some(h.split_whitespace().next().unwrap_or("").to_string());
+        } else {
+            seq.push_str(line.trim());
+        }
+    }
+    if let Some(rid) = id.take() {
+        app.append_row(params![refpkg, rid, seq.as_str()])?;
+        n += 1;
+    }
+    app.flush()?;
+    Ok(n)
+}
+
+/// Import prefilter best-hit.tsv rows belonging to this refpkg's HMM.
+/// Returns (row count, set of hmm_acc seen) so the caller can locate this
+/// refpkg's evalues column.
+fn import_prefilter_hits(
+    conn: &Connection,
+    refpkg: &str,
+    hmm_name: Option<&str>,
+    path: &Path,
+) -> Result<(usize, std::collections::HashSet<String>)> {
+    let mut rdr = tsv_reader(path)?;
+    let hdr = header_index(&rdr.headers()?.clone());
+    let col = |name: &str| -> Option<usize> { hdr.get(name).copied() };
+    let get = |rec: &csv::StringRecord, name: &str| -> String {
+        col(name).and_then(|i| rec.get(i)).unwrap_or("").to_string()
+    };
+
+    let mut app = conn.appender("prefilter_hits")?;
+    let mut n = 0usize;
+    let mut accs = std::collections::HashSet::new();
+    for rec in rdr.records() {
+        let rec = rec.with_context(|| format!("reading {}", path.display()))?;
+        let hname = get(&rec, "hmm_name");
+        // keep only rows for this refpkg's HMM (when a name is supplied)
+        if let Some(want) = hmm_name {
+            if hname != want {
+                continue;
+            }
+        }
+        let region = get(&rec, "region_name");
+        let hacc = get(&rec, "hmm_acc");
+        if !hacc.is_empty() {
+            accs.insert(hacc.clone());
+        }
+        app.append_row(params![
+            refpkg,
+            region,
+            get(&rec, "protein"),
+            parse_opt_i64(&get(&rec, "length(aa)"))?,
+            get(&rec, "protein_info"),
+            hname,
+            hacc,
+            get(&rec, "hmm_desc"),
+            parse_opt_i64(&get(&rec, "hmm_len"))?,
+            parse_opt_f64(&get(&rec, "score"))?,
+            parse_opt_f64(&get(&rec, "bias"))?,
+            parse_opt_f64(&get(&rec, "c-Evalue"))?,
+            parse_opt_f64(&get(&rec, "i-Evalue"))?,
+            parse_opt_i64(&get(&rec, "hmm.fm"))?,
+            parse_opt_i64(&get(&rec, "hmm.to"))?,
+            parse_opt_i64(&get(&rec, "ali.fm"))?,
+            parse_opt_i64(&get(&rec, "ali.to"))?,
+            parse_opt_i64(&get(&rec, "env.fm"))?,
+            parse_opt_i64(&get(&rec, "env.to"))?,
+            parse_opt_f64(&get(&rec, "acc"))?,
+            parse_opt_f64(&get(&rec, "full-Evalue"))?,
+            parse_opt_f64(&get(&rec, "full-score"))?,
+            get(&rec, "link"),
+        ])?;
+        n += 1;
+    }
+    app.flush()?;
+    Ok((n, accs))
+}
+
+/// Import the evalues.tsv column for this refpkg's HMM (matched by hmm_name or
+/// one of the hmm_acc values seen in best-hit.tsv), keeping only non-empty
+/// cells.
+fn import_prefilter_evalues(
+    conn: &Connection,
+    refpkg: &str,
+    hmm_name: Option<&str>,
+    accs: &std::collections::HashSet<String>,
+    path: &Path,
+) -> Result<usize> {
+    let mut rdr = tsv_reader(path)?;
+    let header = rdr.headers()?.clone();
+    // evalues header is: seq <hmm_or_acc_1> <hmm_or_acc_2> ...
+    // pick the column whose label matches this refpkg's hmm_name or an acc.
+    let target = (1..header.len()).find(|&i| {
+        let h = &header[i];
+        hmm_name == Some(h) || accs.contains(h)
+    });
+    let target = match target {
+        Some(i) => i,
+        None => return Ok(0), // this refpkg's HMM column not present
+    };
+
+    let mut app = conn.appender("prefilter_evalues")?;
+    let mut n = 0usize;
+    for rec in rdr.records() {
+        let rec = rec.with_context(|| format!("reading {}", path.display()))?;
+        let cell = rec.get(target).unwrap_or("").trim();
+        if cell.is_empty() {
+            continue; // only keep cells that have a value
+        }
+        let seq = rec.get(0).unwrap_or("");
+        app.append_row(params![refpkg, seq, parse_opt_f64(cell)?])?;
+        n += 1;
+    }
+    app.flush()?;
+    Ok(n)
 }
 
 fn tsv_reader(path: &Path) -> Result<csv::Reader<std::fs::File>> {
@@ -606,6 +791,79 @@ mod tests {
         assert_eq!(aln, "/db/refpkg/rhodopsin/subACV/x.mfa");
         assert_eq!(tree, "/db/refpkg/rhodopsin/subACV/x.tree");
         assert_eq!(hmm, "/db/refpkg/rhodopsin/subACV/x.hmm");
+    }
+
+    #[test]
+    fn import_prefilter_filters_by_hmm_name() {
+        let conn = fresh_conn();
+        // best-hit.tsv with two HMMs; only rpA's rows should land in rpA's DB.
+        let hdr = "protein\tlength(aa)\tprotein_info\thmm_name\thmm_acc\thmm_desc\thmm_len\t\
+                   score\tbias\tc-Evalue\ti-Evalue\thmm.fm\thmm.to\tali.fm\tali.to\t\
+                   env.fm\tenv.to\tacc\tfull-Evalue\tfull-score\tlink\tregion_name";
+        let r1 = "P1\t300\t\thmmA\tPF1\tdescA\t229\t100.0\t0.1\t1e-50\t2e-50\t1\t229\t72\t337\t70\t340\t0.95\t1e-49\t101.0\t\tP1_fm72_to337";
+        let r2 = "P2\t250\t\thmmB\tPF2\tdescB\t180\t80.0\t0.2\t1e-30\t2e-30\t1\t180\t10\t200\t8\t202\t0.9\t1e-29\t81.0\t\tP2_fm10_to200";
+        let tsv = write_tsv(&format!("{hdr}\n{r1}\n{r2}\n"));
+
+        let (n, accs) = import_prefilter_hits(&conn, "rpA", Some("hmmA"), tsv.path()).unwrap();
+        assert_eq!(n, 1);
+        assert!(accs.contains("PF1"));
+        assert_eq!(count(&conn, "prefilter_hits"), 1);
+
+        let (region, iev, alifm, alito): (String, f64, i64, i64) = conn
+            .query_row(
+                "SELECT region_name, i_evalue, ali_fm, ali_to FROM prefilter_hits",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(region, "P1_fm72_to337");
+        assert_eq!(iev, 2e-50);
+        assert_eq!(alifm, 72);
+        assert_eq!(alito, 337);
+
+        // evalues.tsv: only the matching column (by acc PF1), non-empty cells.
+        let ev = write_tsv("seq\tPF1\tPF2\nP1\t2e-50\t\nP2\t\t2e-30\nP3\t\t\n");
+        let ne = import_prefilter_evalues(&conn, "rpA", Some("hmmA"), &accs, ev.path()).unwrap();
+        assert_eq!(ne, 1); // only P1 has a value in PF1
+        let (seq, val): (String, f64) = conn
+            .query_row("SELECT seq, i_evalue FROM prefilter_evalues", [], |r| {
+                Ok((r.get(0)?, r.get(1)?))
+            })
+            .unwrap();
+        assert_eq!(seq, "P1");
+        assert_eq!(val, 2e-50);
+    }
+
+    #[test]
+    fn query_region_view_slices_whole_by_coords() {
+        let conn = fresh_conn();
+        // whole protein P1 (ungapped), and a best-hit region P1_fm3_to6.
+        let whole = write_tsv(">P1 desc\nMKLAPCDE\n>P2\nQRST\n");
+        let nw = import_fasta(&conn, "query_whole", "rpA", whole.path()).unwrap();
+        assert_eq!(nw, 2);
+
+        // aligned_wo_ref.fa -> query_aligned (gapped); ungapping need not equal region
+        let aln = write_tsv(">P1_fm3_to6\nL-AP\n");
+        let na = import_fasta(&conn, "query_aligned", "rpA", aln.path()).unwrap();
+        assert_eq!(na, 1);
+
+        let hdr = "protein\tlength(aa)\tprotein_info\thmm_name\thmm_acc\thmm_desc\thmm_len\t\
+                   score\tbias\tc-Evalue\ti-Evalue\thmm.fm\thmm.to\tali.fm\tali.to\t\
+                   env.fm\tenv.to\tacc\tfull-Evalue\tfull-score\tlink\tregion_name";
+        // P1 region at residues 3..6 of MKLAPCDE => "LAPC"
+        let row = "P1\t8\t\thmmA\tPF1\t\t229\t10\t0.1\t1e-9\t2e-9\t1\t4\t3\t6\t3\t6\t0.9\t1e-8\t11\t\tP1_fm3_to6";
+        let tsv = write_tsv(&format!("{hdr}\n{row}\n"));
+        import_prefilter_hits(&conn, "rpA", Some("hmmA"), tsv.path()).unwrap();
+
+        let (qn, region_seq): (String, String) = conn
+            .query_row(
+                "SELECT query_name, sequence FROM query_region WHERE region_name='P1_fm3_to6'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(qn, "P1");
+        assert_eq!(region_seq, "LAPC"); // MKLAPCDE[3..6]
     }
 
     #[test]

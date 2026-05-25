@@ -95,6 +95,72 @@ pub fn create_all(conn: &Connection) -> Result<()> {
             path    TEXT,
             version TEXT
         );
+
+        -- prefilter best hits (hmmsearch parsed: non-overlapping, linked-merged,
+        -- filter-passing). One row per detected region for THIS refpkg's HMM
+        -- (best-hit.tsv rows where hmm_name == the refpkg's HMM name).
+        CREATE TABLE IF NOT EXISTS prefilter_hits (
+            refpkg       TEXT NOT NULL,
+            region_name  TEXT,
+            protein      TEXT,
+            protein_len  BIGINT,
+            protein_info TEXT,
+            hmm_name     TEXT,
+            hmm_acc      TEXT,
+            hmm_desc     TEXT,
+            hmm_len      BIGINT,
+            score        DOUBLE,
+            bias         DOUBLE,
+            c_evalue     DOUBLE,
+            i_evalue     DOUBLE,
+            hmm_fm       BIGINT,
+            hmm_to       BIGINT,
+            ali_fm       BIGINT,
+            ali_to       BIGINT,
+            env_fm       BIGINT,
+            env_to       BIGINT,
+            acc          DOUBLE,
+            full_evalue  DOUBLE,
+            full_score   DOUBLE,
+            link         TEXT
+        );
+
+        -- whole (ungapped) query protein sequence, one row per detected protein
+        -- (result/<refpkg>/seq/whole.fa). region sequences are NOT stored; they
+        -- are a slice of the whole sequence (see the query_region view).
+        CREATE TABLE IF NOT EXISTS query_whole (
+            refpkg     TEXT NOT NULL,
+            query_name TEXT NOT NULL,
+            sequence   TEXT NOT NULL
+        );
+
+        -- aligned (gapped) query sequence in backbone column space, one row per
+        -- placed region (result/<refpkg>/alignment/aligned_wo_ref.fa). The full
+        -- alignment (aligned.fa) is this plus the refpkg backbone alignment.
+        CREATE TABLE IF NOT EXISTS query_aligned (
+            refpkg      TEXT NOT NULL,
+            region_name TEXT NOT NULL,
+            sequence    TEXT NOT NULL
+        );
+
+        -- region (ungapped) sequence = the whole protein sliced at the best-hit
+        -- alignment coordinates. Derived, so seq/region.fa needs no storage.
+        CREATE VIEW IF NOT EXISTS query_region AS
+            SELECT h.refpkg,
+                   h.region_name,
+                   h.protein AS query_name,
+                   substr(w.sequence, h.ali_fm, h.ali_to - h.ali_fm + 1) AS sequence
+            FROM prefilter_hits h
+            JOIN query_whole w
+              ON w.refpkg = h.refpkg AND w.query_name = h.protein;
+
+        -- per-sequence best i-Evalue against this refpkg's HMM (evalues.tsv),
+        -- only cells that actually had a value (sparse matrix -> long format).
+        CREATE TABLE IF NOT EXISTS prefilter_evalues (
+            refpkg   TEXT NOT NULL,
+            seq      TEXT NOT NULL,
+            i_evalue DOUBLE
+        );
         "#,
     )?;
     Ok(())

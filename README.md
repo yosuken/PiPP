@@ -160,6 +160,15 @@ At the end of a run, `pipp_util import` loads three TSVs from each `result/<refp
 | `refpkgs`          | `refpkg/<name>/backbone.json`            | one row per refpkg (identity + source provenance: refpkg_dir, hmmname, hmmlen, aln/tree/hmm source paths) |
 | `run_params`       | `run_params.json`                        | one row per (refpkg, option) — all run-time options as key/value, plus pipp_version, run_datetime, command_line, query |
 | `software`         | `run_params.json`                        | one row per external tool (name, resolved path, version) |
+| `prefilter_hits`   | `prefilter/.../best-hit.tsv`             | one row per detected region for this refpkg's HMM (hmmsearch i-Evalue, score, hmm/ali/env coords, …) |
+| `prefilter_evalues`| `prefilter/.../evalues.tsv`              | one row per (seq) with a non-empty best i-Evalue against this refpkg's HMM |
+| `query_whole`      | `seq/whole.fa`                           | one row per detected protein — whole (ungapped) sequence |
+| `query_aligned`    | `alignment/aligned_wo_ref.fa`            | one row per region — aligned (gapped) query in backbone columns |
+
+The other sequence files are **derived**, not stored, to avoid redundancy:
+
+- `query_region` (a view) reconstructs `seq/region.fa` = `query_whole` sliced at each hit's `prefilter_hits.ali_fm..ali_to`.
+- the full `alignment/aligned.fa` = the refpkg backbone alignment (`<refpkg>/derived/backbone.mfa`) + `query_aligned`.
 
 `aligned_positions` is stored in long format: the dynamic per-position columns from the TSV (driven by the refpkg's `position.tsv`) become rows keyed by `pos_label`.
 

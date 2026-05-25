@@ -1329,13 +1329,21 @@ task "01-7a.duckdb_import", ["step"] do |t, args|
   frun = "#{Odir}/run_params.json"
   open(frun, "w"){ |fw| fw.puts({ "params" => run_params, "software" => $software }.to_json) }
 
+  ### shared prefilter outputs (parsed once across refpkgs); per-refpkg rows are
+  ### selected by --hmm-name. Still present at this point (cleanup runs later).
+  pdir = "#{PreFildir}/#{$fque[:name]}/parsed"
+
   $fpkgs.each{ |pkg|
     bdir = "#{Resdir}/#{pkg[:name]}"
     next unless File.directory?(bdir)
 
     flog = "#{bdir}/pipp.duckdb.log"
     fjsn = "#{Pkgdir}/#{pkg[:name]}/backbone.json"   ## validate_refpkg metadata -> refpkgs table
-    outs << "#{PIPP_UTIL} import #{bdir} --refpkg #{pkg[:name]} --refpkg-json #{fjsn} --run-json #{frun} --overwrite >#{flog} 2>&1"
+    pre  = ""
+    if File.exist?("#{pdir}/best-hit.tsv")
+      pre = " --hmm-name '#{pkg[:hmmname]}' --besthit-tsv #{pdir}/best-hit.tsv --evalues #{pdir}/evalues.tsv"
+    end
+    outs << "#{PIPP_UTIL} import #{bdir} --refpkg #{pkg[:name]} --refpkg-json #{fjsn} --run-json #{frun}#{pre} --overwrite >#{flog} 2>&1"
   }
 
   WriteBatch.call(t, Jobdir, outs)
