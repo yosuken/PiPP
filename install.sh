@@ -13,7 +13,7 @@
 #  - duckdb is NOT a dependency: pipp_util bundles its own DuckDB. A duckdb CLI
 #    (>=1.0) is optional, only for querying the output DBs.
 #  - Prefer conda? environment.yaml is kept for that; see README.md
-#    ("conda / micromamba (compat)").
+#    ("conda / micromamba (compatible)").
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"

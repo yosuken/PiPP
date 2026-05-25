@@ -72,7 +72,7 @@ class PiPP
       ncpus: 1
     }
     
-    real        = File.realpath($0)            # resolve symlinks (e.g. the PiPP compat alias) to the real script
+    real        = File.realpath($0)            # resolve symlinks (e.g. the PiPP compatible alias) to the real script
     @progname   = File.basename(real)          # resolves to "pipp" so we find pipp.rake even when invoked as `PiPP`
     @progpath   = real
     @stime      = Time.now

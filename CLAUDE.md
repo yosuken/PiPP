@@ -38,7 +38,7 @@ The Rake pipeline locates `pipp_util` in this order: `$PIPP_UTIL_BIN` → `which
 
 ### Core Components
 
-1. **`pipp` (Ruby entry point)**: parses CLI options, sets ENV, hands off to Rake. (`PiPP` is a backward-compat alias.)
+1. **`pipp` (Ruby entry point)**: parses CLI options, sets ENV, hands off to Rake. (`PiPP` is a backward-compatible alias.)
 2. **`pipp.rake`**: orchestrates the sequential task graph.
 3. **`script/` (Ruby helpers)**: small per-task scripts (validation, alignment post-processing, feature extraction).
 4. **`rust/` (`pipp_util` crate)**: bundled Rust binary providing the `import` (TSV → DuckDB) and `parse-hmmsearch` subcommands. Hot-path scripts are being ported here over time.

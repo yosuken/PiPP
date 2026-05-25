@@ -36,7 +36,7 @@ relative `-q`/`-r`/`-o` paths resolve as expected):
 $ pixi run ./pipp -q <query.fa> -r <refpkg> -o <out>
 ```
 
-The canonical command is `pipp` (lowercase); `PiPP` is kept as a backward-compat
+The canonical command is `pipp` (lowercase); `PiPP` is kept as a backward-compatible
 alias. To call them from anywhere, drop a launcher on your `PATH`:
 
 ```
@@ -45,7 +45,7 @@ $ cat > ~/.local/bin/pipp <<'EOF'
 exec pixi run --manifest-path /ABS/PATH/TO/PiPP/pixi.toml /ABS/PATH/TO/PiPP/pipp "$@"
 EOF
 $ chmod +x ~/.local/bin/pipp
-$ ln -sf pipp ~/.local/bin/PiPP        # compat alias (skip on case-insensitive FS)
+$ ln -sf pipp ~/.local/bin/PiPP        # compatible alias (skip on case-insensitive FS)
 ```
 
 > `pipp` and `PiPP` case-fold to the same name, so only the lowercase `pipp`
@@ -61,7 +61,7 @@ $ ln -sf pipp ~/.local/bin/PiPP        # compat alias (skip on case-insensitive 
 > its own DuckDB. A `duckdb` CLI (>=1.0) is optional, only for querying the
 > output DBs (use any system install / mise / conda).
 
-### conda / micromamba (compat)
+### conda / micromamba (compatible)
 
 If you'd rather not use pixi, `environment.yaml` is kept for conda-family tools.
 A strict solve fails (pplacer/fasttree deps vs latest conda-forge), so flexible

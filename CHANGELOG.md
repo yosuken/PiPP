@@ -43,13 +43,13 @@ When cutting a release `vX.Y.Z`:
   `pipp_util` (`pixi run -e build build`). `install.sh` now wraps
   `pixi install` + the build task.
 - `environment.yaml` for conda environment setup (`PiPP_v0.4.0`), kept as a
-  compat path for conda/micromamba users (pixi is preferred).
+  compatible path for conda/micromamba users (pixi is preferred).
 - `meta.yaml` skeleton for a future Bioconda recipe.
 - `ci/run.sh` (local-runnable) and `.github/workflows/ci.yml` covering
   Ruby syntax, Rust fmt/clippy/build, and a self-contained `pipp_util`
   smoke test using synthetic TSVs.
 - The entry point and Rake file are now lowercase (`pipp`, `pipp.rake`); `pipp`
-  is the canonical command. `PiPP` is kept as a backward-compat alias created at
+  is the canonical command. `PiPP` is kept as a backward-compatible alias created at
   install time (PATH launcher, or a guarded `$PREFIX/bin` symlink for Bioconda),
   not committed to the repo — `PiPP` and `pipp` case-fold to the same name and
   would collide on case-insensitive filesystems (macOS/Windows), so only the
