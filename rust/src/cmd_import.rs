@@ -370,7 +370,10 @@ fn import_aligned_positions(conn: &Connection, refpkg: &str, path: &Path) -> Res
 
         for (j, label) in pos_labels.iter().enumerate() {
             let residues = &rec[j + 1];
-            app.append_row(params![refpkg, query, label, residues, fract, taxpath])?;
+            let pos_index = j as i64; // 0-based column order in the source TSV
+            app.append_row(params![
+                refpkg, query, pos_index, label, residues, fract, taxpath
+            ])?;
             n += 1;
         }
     }
@@ -524,14 +527,29 @@ mod tests {
         assert_eq!(n, 6);
         assert_eq!(count(&conn, "aligned_positions"), 6);
 
-        let residues: String = conn
+        let (residues, idx): (String, i32) = conn
             .query_row(
-                "SELECT residues FROM aligned_positions WHERE query_name='seq1' AND pos_label='TM3_C78'",
+                "SELECT residues, pos_index FROM aligned_positions WHERE query_name='seq1' AND pos_label='TM3_C78'",
                 [],
-                |r| r.get(0),
+                |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
         assert_eq!(residues, "R");
+        assert_eq!(idx, 1); // TM3_C78 is the 2nd position column (0-based index 1)
+
+        // pos_index recovers the original wide-table column order.
+        let order: Vec<String> = {
+            let mut stmt = conn
+                .prepare("SELECT DISTINCT pos_label FROM aligned_positions ORDER BY pos_index")
+                .unwrap();
+            let rows = stmt
+                .query_map([], |r| r.get::<_, String>(0))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect();
+            rows
+        };
+        assert_eq!(order, vec!["TM2_D51", "TM3_C78", "TM3_E102"]);
     }
 
     // --- import_refpkg_meta ---

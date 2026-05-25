@@ -47,10 +47,11 @@ pub fn create_all(conn: &Connection) -> Result<()> {
         );
 
         CREATE TABLE IF NOT EXISTS aligned_positions (
-            refpkg     TEXT   NOT NULL,
-            query_name TEXT   NOT NULL,
-            pos_label  TEXT   NOT NULL,
-            residues   TEXT   NOT NULL,
+            refpkg     TEXT    NOT NULL,
+            query_name TEXT    NOT NULL,
+            pos_index  INTEGER NOT NULL,  -- 0-based column order in the source TSV (recovers wide-table layout)
+            pos_label  TEXT    NOT NULL,
+            residues   TEXT    NOT NULL,
             fract      DOUBLE,
             taxpath    TEXT
         );

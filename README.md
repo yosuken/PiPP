@@ -155,7 +155,7 @@ At the end of a run, `pipp_util import` loads three TSVs from each `result/<refp
 |--------------------|------------------------------------------|--------------------------------------|
 | `assignments`      | `assign/per_query.tsv`                   | one row per (query, taxopath)        |
 | `aa_features`      | `feature/aa/feature.tsv`                 | one row per query                    |
-| `aligned_positions`| `alignment/aligned_position.tsv`         | one row per (query, position_label)  |
+| `aligned_positions`| `alignment/aligned_position.tsv`         | one row per (query, position_label); `pos_index` preserves the source TSV column order so the wide layout can be reconstructed |
 | `jplace_clamps`    | `placement/*.clamp.tsv`                  | one row per sanitized jplace (only when clamp-jplace fixed non-finite/negative-branch values) |
 | `refpkgs`          | `refpkg/<name>/backbone.json`            | one row per refpkg (identity + source provenance: refpkg_dir, hmmname, hmmlen, aln/tree/hmm source paths) |
 | `run_params`       | `run_params.json`                        | one row per (refpkg, option) — all run-time options as key/value, plus pipp_version, run_datetime, command_line, query |
