@@ -22,8 +22,8 @@ phase_ruby() {
   # plain `-c` syntax check. We deliberately do not run a full linter
   # (rubocop/standardrb) to avoid style wars; `ruby -wc` catches real bugs.
   bold "=== ruby syntax (ruby -wc) ==="
-  ruby -wc PiPP
-  ruby -wc PiPP.rake
+  ruby -wc pipp
+  ruby -wc pipp.rake
   for f in script/*.rb; do
     ruby -wc "$f"
   done

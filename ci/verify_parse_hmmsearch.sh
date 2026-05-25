@@ -40,7 +40,7 @@ tmp="$tmp_base/$(basename "$(dirname "$run_dir")")_${run_name}"
 rm -rf "$tmp"
 mkdir -p "$tmp/ruby" "$tmp/rust"
 
-# Concatenate sub*.out (same as PiPP.rake 01-2b)
+# Concatenate sub*.out (same as pipp.rake 01-2b)
 concat="$tmp/hmmsearch_concat.out"
 cat "$hmm_dir"/sub*.out > "$concat"
 n_subout=$(ls "$hmm_dir"/sub*.out | wc -l)

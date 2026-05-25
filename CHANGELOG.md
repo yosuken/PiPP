@@ -12,7 +12,7 @@ When cutting a release `vX.Y.Z`:
 
 1. Rename `## [Unreleased]` below to `## [X.Y.Z] - YYYY-MM-DD` and add a
    fresh empty `## [Unreleased]` block above it.
-2. Bump the version in `PiPP` (Ruby `VERSION`/`MODIDATE`), `rust/Cargo.toml`,
+2. Bump the version in `pipp` (Ruby `VERSION`/`MODIDATE`), `rust/Cargo.toml`,
    `environment.yaml` (`name: PiPP_vX.Y.Z`), `meta.yaml`
    (`{% set version = "X.Y.Z" %}`), and README's `### PiPP ver X.Y.Z` block.
 3. Update the link references at the bottom of this file
@@ -48,12 +48,14 @@ When cutting a release `vX.Y.Z`:
 - `ci/run.sh` (local-runnable) and `.github/workflows/ci.yml` covering
   Ruby syntax, Rust fmt/clippy/build, and a self-contained `pipp_util`
   smoke test using synthetic TSVs.
-- Entry point now resolves symlinks (`File.realpath`) so it works when invoked
-  through a `bin/` symlink or under a different name. This lets a lowercase
-  `pipp` alias be created at install time (PATH launcher, or a guarded
-  `$PREFIX/bin` symlink for Bioconda) without committing a `pipp` file to the
-  repo — `PiPP` and `pipp` case-fold to the same name and would collide on
-  case-insensitive filesystems (macOS/Windows). The repo keeps `PiPP` only.
+- The entry point and Rake file are now lowercase (`pipp`, `pipp.rake`); `pipp`
+  is the canonical command. `PiPP` is kept as a backward-compat alias created at
+  install time (PATH launcher, or a guarded `$PREFIX/bin` symlink for Bioconda),
+  not committed to the repo — `PiPP` and `pipp` case-fold to the same name and
+  would collide on case-insensitive filesystems (macOS/Windows), so only the
+  lowercase files live in git. The entry point resolves symlinks
+  (`File.realpath`) so invocation through the `PiPP` alias still finds
+  `pipp.rake`. Project branding remains "PiPP".
 
 ### Changed
 - `-q` now accepts a single FASTA only. Glob patterns and

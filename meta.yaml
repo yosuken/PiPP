@@ -24,14 +24,17 @@ build:
 
     # 2) Ruby orchestration + helper scripts -> $PREFIX/share/{{ name }}
     mkdir -p $PREFIX/share/{{ name }} $PREFIX/bin
-    cp -r PiPP PiPP.rake script bin $PREFIX/share/{{ name }}/
-    chmod +x $PREFIX/share/{{ name }}/PiPP
-    cat > $PREFIX/bin/PiPP <<'EOF'
+    cp -r pipp pipp.rake script bin $PREFIX/share/{{ name }}/
+    chmod +x $PREFIX/share/{{ name }}/pipp
+    cat > $PREFIX/bin/pipp <<'EOF'
     #!/bin/bash
     DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")"/../share/{{ name }} && pwd)"
-    exec "$DIR/PiPP" "$@"
+    exec "$DIR/pipp" "$@"
     EOF
-    chmod +x $PREFIX/bin/PiPP
+    chmod +x $PREFIX/bin/pipp
+    # backward-compat uppercase alias. Guarded so it is skipped on
+    # case-insensitive filesystems, where PiPP and pipp are the same path.
+    if [ ! -e "$PREFIX/bin/PiPP" ]; then ln -s pipp "$PREFIX/bin/PiPP"; fi
 
 requirements:
   build:

@@ -72,12 +72,12 @@ class PiPP
       ncpus: 1
     }
     
-    real        = File.realpath($0)            # resolve symlinks (e.g. bin/PiPP, bin/pipp) to the real script
-    @progname   = File.basename(real)          # always "PiPP" so we find PiPP.rake even when invoked as `pipp`
+    real        = File.realpath($0)            # resolve symlinks (e.g. the PiPP compat alias) to the real script
+    @progname   = File.basename(real)          # resolves to "pipp" so we find pipp.rake even when invoked as `PiPP`
     @progpath   = real
     @stime      = Time.now
     @stime_str  = @stime.strftime("%Y-%m-%d_%H:%M:%S")
-    @script_dir = File.dirname(real)           # locate PiPP.rake / script/ next to the real script, not the symlink
+    @script_dir = File.dirname(real)           # locate pipp.rake / script/ next to the real script, not the symlink
     @incmd      = "#{$0} #{ARGV.join(' ')}"
   end
   # }}} def initialize
@@ -85,10 +85,10 @@ class PiPP
   # {{{ def usage
   def usage
     <<~EOF
-    \e[1;35m### #{@progname} ver #{VERSION} (#{MODIDATE}) ###\e[0m
+    \e[1;35m### PiPP ver #{VERSION} (#{MODIDATE}) ###\e[0m
 
-    #{@progname} - Pipeline for phylogenetic placement.
-    #{@progname} is developed as a tool for phylogenetic placement onto a clade or taxonomy defined phylogenetic tree through procedures below.
+    PiPP - Pipeline for phylogenetic placement.
+    PiPP is developed as a tool for phylogenetic placement onto a clade or taxonomy defined phylogenetic tree through procedures below.
     
     1. prefilter query sequences by similarity detection (hmmsearch). Queries and references should be protein sequences at this moment.
     2. align query sequences to a given reference alignment ('witch-ng', 'mafft --add', or 'mafft --addfragments')

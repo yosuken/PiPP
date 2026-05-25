@@ -54,6 +54,6 @@ if [[ $skip_rust -eq 0 ]]; then
 fi
 
 echo
-echo "Run PiPP inside the env, e.g. from the repo dir:"
-echo "  pixi run ./PiPP -q <query.fa> -r <refpkg> -o <out>"
-echo "Or put a launcher on PATH so PiPP works from anywhere (see README.md)."
+echo "Run pipp inside the env, e.g. from the repo dir:"
+echo "  pixi run ./pipp -q <query.fa> -r <refpkg> -o <out>"
+echo "Or put a launcher on PATH so pipp works from anywhere (see README.md)."

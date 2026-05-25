@@ -29,22 +29,29 @@ $ pixi install
 $ pixi run -e build build            # = cargo build --release (rust-only env)
 ```
 
-Then run PiPP through pixi (it activates the env and keeps your cwd, so
+Then run `pipp` through pixi (it activates the env and keeps your cwd, so
 relative `-q`/`-r`/`-o` paths resolve as expected):
 
 ```
-$ pixi run ./PiPP -q <query.fa> -r <refpkg> -o <out>
+$ pixi run ./pipp -q <query.fa> -r <refpkg> -o <out>
 ```
 
-To call `PiPP` (and `pipp`) from anywhere, drop a launcher on your `PATH`:
+The canonical command is `pipp` (lowercase); `PiPP` is kept as a backward-compat
+alias. To call them from anywhere, drop a launcher on your `PATH`:
 
 ```
-$ cat > ~/.local/bin/PiPP <<'EOF'
+$ cat > ~/.local/bin/pipp <<'EOF'
 #!/usr/bin/env bash
-exec pixi run --manifest-path /ABS/PATH/TO/PiPP/pixi.toml /ABS/PATH/TO/PiPP/PiPP "$@"
+exec pixi run --manifest-path /ABS/PATH/TO/PiPP/pixi.toml /ABS/PATH/TO/PiPP/pipp "$@"
 EOF
-$ chmod +x ~/.local/bin/PiPP && ln -sf PiPP ~/.local/bin/pipp
+$ chmod +x ~/.local/bin/pipp
+$ ln -sf pipp ~/.local/bin/PiPP        # compat alias (skip on case-insensitive FS)
 ```
+
+> `pipp` and `PiPP` case-fold to the same name, so only the lowercase `pipp`
+> lives in the repo; the uppercase alias is created here at install time (and
+> guarded in the Bioconda recipe) to avoid breaking clones on case-insensitive
+> filesystems (macOS/Windows).
 
 `pipp_util` ingests the per-refpkg TSV outputs into a DuckDB file at the end of the pipeline.
 
@@ -115,7 +122,7 @@ PiPP is developed as a tool for phylogenetic placement onto a clade or taxonomy 
   c. extract placed sequences and placement file for each clade/taxonomy ('gappa prepare extract')
 
 [usage]
-$ PiPP [options] -q <query fasta> -r <refpkg dir(s)> -o <output dir>
+$ pipp [options] -q <query fasta> -r <refpkg dir(s)> -o <output dir>
 
 [dependencies]
 - ruby (ver >= 2.0)

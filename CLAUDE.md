@@ -28,18 +28,18 @@ The Rake pipeline locates `pipp_util` in this order: `$PIPP_UTIL_BIN` → `which
 ### Running the Main Pipeline
 ```bash
 # Basic usage (single query FASTA only since v0.4.0)
-./PiPP -q <query_fasta> -r <refpkg_dir> -o <output_dir>
+./pipp -q <query_fasta> -r <refpkg_dir> -o <output_dir>
 
 # Example with options
-./PiPP -q queries/sample.fa -r refpkgs/refpkg1 -o results --ncpus 4 --evalue 1e-10 --keep-intermediate
+./pipp -q queries/sample.fa -r refpkgs/refpkg1 -o results --ncpus 4 --evalue 1e-10 --keep-intermediate
 ```
 
 ## Architecture Overview
 
 ### Core Components
 
-1. **`PiPP` (Ruby entry point)**: parses CLI options, sets ENV, hands off to Rake.
-2. **`PiPP.rake`**: orchestrates the sequential task graph.
+1. **`pipp` (Ruby entry point)**: parses CLI options, sets ENV, hands off to Rake. (`PiPP` is a backward-compat alias.)
+2. **`pipp.rake`**: orchestrates the sequential task graph.
 3. **`script/` (Ruby helpers)**: small per-task scripts (validation, alignment post-processing, feature extraction).
 4. **`rust/` (`pipp_util` crate)**: bundled Rust binary providing the `import` (TSV → DuckDB) and `parse-hmmsearch` subcommands. Hot-path scripts are being ported here over time.
 
