@@ -3,7 +3,7 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - ruby >=3,<4          # pin to the 3.x series (4.0 is a new major; PiPP validated on 3.4)
+  - ruby >=3             # validated on 3.4 and 4.0 (syntax + stdlib/rake load clean)
   - hmmer >=3.0
   - mafft >=7.453
   - gappa >=0.6
