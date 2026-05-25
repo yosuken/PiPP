@@ -13,7 +13,7 @@ PiPP uses [pixi](https://pixi.sh) as its primary environment manager: one
 (apples, taxtastic), and a separate `build` environment holds the Rust
 toolchain that compiles `pipp_util`.
 
-### one-liner (pixi)
+### 1. one-liner (pixi)
 
 ```
 $ ./install.sh                       # pixi install + build pipp_util
@@ -61,7 +61,19 @@ $ ln -sf pipp ~/.local/bin/PiPP        # compatible alias (skip on case-insensit
 > its own DuckDB. A `duckdb` CLI (>=1.0) is optional, only for querying the
 > output DBs (use any system install / mise / conda).
 
-### conda / micromamba (compatible)
+#### witch-ng binary (default `--aligner`)
+
+`witch-ng` (GPLv3) is the default aligner but is not packaged on Bioconda or conda-forge. A helper fetches the right prebuilt binary into `bin/`:
+
+```
+$ bin/install_witch_ng.sh                       # detects platform, fetches v0.0.4
+$ WITCH_NG_VERSION=v0.0.4 bin/install_witch_ng.sh
+```
+
+If you'd rather skip witch-ng, pass `--aligner mafft-add` on every run.
+
+
+### 2. conda / micromamba
 
 If you'd rather not use pixi, `environment.yaml` is kept for conda-family tools.
 A strict solve fails (pplacer/fasttree deps vs latest conda-forge), so flexible
@@ -79,28 +91,18 @@ The pipeline locates the binary in this order:
 2. `pipp_util` found on `$PATH` (e.g. via Bioconda)
 3. `rust/target/release/pipp_util` (after the `cargo build` above)
 
-### witch-ng binary (default `--aligner`)
+#### witch-ng binary (default `--aligner`)
 
-`witch-ng` (GPLv3) is the default aligner but is not packaged on Bioconda or conda-forge. A helper fetches the right prebuilt binary into `bin/`:
+See above.
 
-```
-$ bin/install_witch_ng.sh                       # detects platform, fetches v0.0.4
-$ WITCH_NG_VERSION=v0.0.4 bin/install_witch_ng.sh
-```
+#### apples (only used with `--placer apples-2`)
 
-If you'd rather skip witch-ng, pass `--aligner mafft-add` on every run.
-
-### apples (optional, for `--placer apples-2`)
-
-The default placer is `pplacer` (on Bioconda, no extra step). `apples`
-(GPL-3.0) is only on PyPI, so install it via pip only if you want the
-apples-2 placer:
-
-```
-$ pip install apples
-```
-
-(The bundled `environment.yaml` already includes this.)
+The default placer is `pplacer`; `apples` (GPL-3.0, PyPI-only) is used only when
+you pass `--placer apples-2`. No separate `pip install apples` is needed — it is
+already bundled in **both** install paths (`pixi install` via `pixi.toml`, and
+`environment.yaml` for the conda path). If `apples` is missing the run still
+works with the default placer; PiPP's startup tool check just notes it as
+`(not found)`.
 
 ### (future) Bioconda
 
