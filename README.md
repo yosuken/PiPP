@@ -8,34 +8,63 @@ PiPP is developed as a tool for phylogenetic placement onto a clade or taxonomy 
 
 ## install
 
-### one-liner
+PiPP uses [pixi](https://pixi.sh) as its primary environment manager: one
+`pixi.toml` / `pixi.lock` pins both the conda bio tools and the PyPI deps
+(apples, taxtastic), and a separate `build` environment holds the Rust
+toolchain that compiles `pipp_util`.
+
+### one-liner (pixi)
 
 ```
-$ ./install.sh                       # micromamba; use CONDA=mamba or CONDA=conda otherwise
-$ micromamba activate PiPP_v0.4.0
+$ ./install.sh                       # pixi install + build pipp_util
 ```
 
-`install.sh` wraps two steps. You can run them by hand if you prefer:
+`install.sh` wraps two pixi steps. You can run them by hand if you prefer:
 
 ```
-### [1] runtime conda env (all bio tools). flexible priority is required:
-###     a strict solve fails (pplacer/fasttree deps vs latest conda-forge).
-$ micromamba env create -f environment.yaml --channel-priority flexible
-$ micromamba activate PiPP_v0.4.0
+### [1] runtime env (all bio tools + apples/taxtastic), pinned by pixi.lock
+$ pixi install
 
-### [2] build the bundled Rust binary `pipp_util` (needs a Rust toolchain;
-###     rustup recommended — `cargo` just needs to be on PATH)
-$ cargo build --release --manifest-path rust/Cargo.toml
+### [2] build the bundled Rust binary `pipp_util` in the isolated build env
+$ pixi run -e build build            # = cargo build --release (rust-only env)
+```
+
+Then run PiPP through pixi (it activates the env and keeps your cwd, so
+relative `-q`/`-r`/`-o` paths resolve as expected):
+
+```
+$ pixi run ./PiPP -q <query.fa> -r <refpkg> -o <out>
+```
+
+To call `PiPP` (and `pipp`) from anywhere, drop a launcher on your `PATH`:
+
+```
+$ cat > ~/.local/bin/PiPP <<'EOF'
+#!/usr/bin/env bash
+exec pixi run --manifest-path /ABS/PATH/TO/PiPP/pixi.toml /ABS/PATH/TO/PiPP/PiPP "$@"
+EOF
+$ chmod +x ~/.local/bin/PiPP && ln -sf PiPP ~/.local/bin/pipp
 ```
 
 `pipp_util` ingests the per-refpkg TSV outputs into a DuckDB file at the end of the pipeline.
 
-> **Note on `rust` and `duckdb`:** neither is in `environment.yaml`. Rust is
-> build-time only (it compiles `pipp_util`); use a system toolchain (rustup),
-> or let `install.sh` spin up a throwaway conda env if `cargo` isn't on PATH.
-> `duckdb` is not a runtime dependency at all — `pipp_util` bundles its own
-> DuckDB. A `duckdb` CLI (>=1.0) is optional, only for querying the output DBs
-> (use any system install / mise / conda).
+> **Note on `rust` and `duckdb`:** Rust is build-time only — it lives in pixi's
+> `build` environment (never co-solved with the runtime deps) and just compiles
+> `pipp_util`. `duckdb` is not a runtime dependency at all — `pipp_util` bundles
+> its own DuckDB. A `duckdb` CLI (>=1.0) is optional, only for querying the
+> output DBs (use any system install / mise / conda).
+
+### conda / micromamba (compat)
+
+If you'd rather not use pixi, `environment.yaml` is kept for conda-family tools.
+A strict solve fails (pplacer/fasttree deps vs latest conda-forge), so flexible
+priority is required, and you build `pipp_util` with a system `cargo`:
+
+```
+$ micromamba env create -f environment.yaml --channel-priority flexible
+$ micromamba activate PiPP_v0.4.0
+$ cargo build --release --manifest-path rust/Cargo.toml
+```
 
 The pipeline locates the binary in this order:
 

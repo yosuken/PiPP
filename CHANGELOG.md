@@ -37,13 +37,19 @@ When cutting a release `vX.Y.Z`:
 - New Rake task `01-7a.duckdb_import` (runs as the final pipeline step).
 - `--keep-intermediate` flag on `PiPP` to retain `prefilter/`, `chunks/`,
   `batch/`, and `log/tasks/` after a run.
-- `environment.yaml` for conda environment setup (`PiPP_v0.4.0`).
+- pixi as the primary environment manager: `pixi.toml` + `pixi.lock` pin the
+  conda runtime (bio tools) and PyPI deps (apples, taxtastic) in one lockfile;
+  a separate `build` environment isolates the Rust toolchain that compiles
+  `pipp_util` (`pixi run -e build build`). `install.sh` now wraps
+  `pixi install` + the build task.
+- `environment.yaml` for conda environment setup (`PiPP_v0.4.0`), kept as a
+  compat path for conda/micromamba users (pixi is preferred).
 - `meta.yaml` skeleton for a future Bioconda recipe.
 - `ci/run.sh` (local-runnable) and `.github/workflows/ci.yml` covering
   Ruby syntax, Rust fmt/clippy/build, and a self-contained `pipp_util`
   smoke test using synthetic TSVs.
-- `install.sh` rewritten as a thin wrapper around `environment.yaml` +
-  `cargo build`.
+- Lowercase `pipp` launcher (symlink to `PiPP`); the entry point now resolves
+  symlinks (`File.realpath`) so it works when invoked through a `bin/` symlink.
 
 ### Changed
 - `-q` now accepts a single FASTA only. Glob patterns and
@@ -58,8 +64,12 @@ When cutting a release `vX.Y.Z`:
   (large fixtures); test code under `test/1/` is no longer ignored. Added
   the usual editor/OS/Python/scratch patterns.
 - README bash status badges replaced with a real CI badge.
+- Ruby constraint relaxed to `>=3` (was `>=3,<4`); validated on 3.4 and 4.0.
+  The pixi.lock stays on the battle-tested 3.4.x until `pixi update ruby`.
 
 ### Removed
+- `environment.lock.txt` and `requirements.lock.txt` (manual conda/pip locks),
+  superseded by `pixi.lock` which pins conda + PyPI in one file.
 - Obsolete `PiPP.sh` bash wrapper (the Ruby `PiPP` has been the entry
   point for a while).
 - The `merge_jplace.rb` invocation in `01-3d.unchunkify`. With a single

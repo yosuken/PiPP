@@ -1,28 +1,23 @@
 #!/usr/bin/env bash
-# Install PiPP dependencies into a conda environment and build the bundled
-# Rust binary. This is a thin wrapper around `environment.yaml` and
-# `cargo build`; you can run those two commands directly if you prefer.
+# Install PiPP with pixi: provision the runtime environment (locked in
+# pixi.lock) and build the bundled Rust binary (pipp_util).
 #
-#   $ ./install.sh                     # use micromamba (default)
-#   $ CONDA=mamba ./install.sh         # or mamba / conda
-#   $ ./install.sh --skip-rust         # don't build pipp_util (e.g. CI without Rust)
-#   $ ./install.sh --skip-env          # don't create the conda env
+#   $ ./install.sh                     # pixi install + build pipp_util
+#   $ ./install.sh --skip-rust         # don't build pipp_util
+#   $ ./install.sh --skip-env          # don't provision the runtime env
 #
 # Notes:
-#  - The runtime env is created with `--channel-priority flexible`. PiPP pulls
-#    packages (e.g. pplacer, fasttree) whose deps cannot be reconciled with the
-#    latest conda-forge toolchain under strict priority, so a strict solve fails
-#    regardless of your global condarc. flexible is required.
-#  - rust is NOT in environment.yaml (build-time only). This script builds
-#    pipp_util with a system `cargo` if one is on PATH (rustup recommended);
-#    otherwise it creates a throwaway conda env just for the build.
-#  - duckdb is NOT in environment.yaml either (pipp_util bundles its own DuckDB).
-#    A duckdb CLI (>=1.0) is optional, only for querying the output DBs.
+#  - Needs `pixi` on PATH (https://pixi.sh). The runtime env (bio tools + apples
+#    etc.) is pinned by pixi.lock. The Rust toolchain lives in a separate `build`
+#    environment so it never co-solves with the runtime deps.
+#  - duckdb is NOT a dependency: pipp_util bundles its own DuckDB. A duckdb CLI
+#    (>=1.0) is optional, only for querying the output DBs.
+#  - Prefer conda? environment.yaml is kept for that; see README.md
+#    ("conda / micromamba (compat)").
 
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-CONDA="${CONDA:-micromamba}"
 skip_env=0
 skip_rust=0
 for arg in "$@"; do
@@ -30,7 +25,7 @@ for arg in "$@"; do
     --skip-env)  skip_env=1 ;;
     --skip-rust) skip_rust=1 ;;
     -h|--help)
-      sed -n '2,20p' "$0" | sed 's/^# \?//'
+      sed -n '2,16p' "$0" | sed 's/^# \?//'
       exit 0
       ;;
     *)
@@ -40,28 +35,25 @@ for arg in "$@"; do
   esac
 done
 
+if ! command -v pixi >/dev/null 2>&1; then
+  echo "error: pixi not found on PATH. Install it from https://pixi.sh" >&2
+  echo "       (or use the conda/micromamba path in README.md)" >&2
+  exit 1
+fi
+
 if [[ $skip_env -eq 0 ]]; then
-  echo "==> creating runtime conda env from environment.yaml (via $CONDA, flexible priority)"
-  "$CONDA" env create -f environment.yaml --channel-priority flexible
-  env_name="$(awk '/^name:/{print $2; exit}' environment.yaml)"
-  echo
-  echo "Activate the env with:"
-  echo "  $CONDA activate $env_name"
+  echo "==> provisioning runtime env from pixi.lock (pixi install)"
+  pixi install
 fi
 
 if [[ $skip_rust -eq 0 ]]; then
-  echo "==> building pipp_util (cargo build --release)"
-  if command -v cargo >/dev/null 2>&1; then
-    echo "    using system cargo: $(command -v cargo)"
-    cargo build --release --manifest-path rust/Cargo.toml
-  else
-    echo "    no system cargo on PATH; creating a throwaway conda Rust env just to build"
-    build_root="$(mktemp -d)"
-    build_env="$build_root/rust"
-    trap '"$CONDA" env remove -y -p "$build_env" >/dev/null 2>&1 || true; rm -rf "$build_root"' EXIT
-    "$CONDA" create -y -p "$build_env" -c conda-forge 'rust>=1.70'
-    "$CONDA" run -p "$build_env" cargo build --release --manifest-path rust/Cargo.toml
-  fi
+  echo "==> building pipp_util in the isolated build env (pixi run -e build build)"
+  pixi run -e build build
   echo
   echo "Binary built at: rust/target/release/pipp_util"
 fi
+
+echo
+echo "Run PiPP inside the env, e.g. from the repo dir:"
+echo "  pixi run ./PiPP -q <query.fa> -r <refpkg> -o <out>"
+echo "Or put a launcher on PATH so PiPP works from anywhere (see README.md)."
