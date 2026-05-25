@@ -72,11 +72,12 @@ class PiPP
       ncpus: 1
     }
     
-    @progname   = File.basename($0)
-    @progpath   = File.absolute_path($0)
+    real        = File.realpath($0)            # resolve symlinks (e.g. bin/PiPP, bin/pipp) to the real script
+    @progname   = File.basename(real)          # always "PiPP" so we find PiPP.rake even when invoked as `pipp`
+    @progpath   = real
     @stime      = Time.now
     @stime_str  = @stime.strftime("%Y-%m-%d_%H:%M:%S")
-    @script_dir = File.dirname(File.expand_path($0))
+    @script_dir = File.dirname(real)           # locate PiPP.rake / script/ next to the real script, not the symlink
     @incmd      = "#{$0} #{ARGV.join(' ')}"
   end
   # }}} def initialize
