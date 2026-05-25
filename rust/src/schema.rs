@@ -64,6 +64,36 @@ pub fn create_all(conn: &Connection) -> Result<()> {
             n_nonfinite  BIGINT NOT NULL,
             n_neg_branch BIGINT NOT NULL
         );
+
+        -- one row per refpkg: identity + provenance taken from the
+        -- validate_refpkg metadata (backbone.json). The source_* columns point
+        -- at the original refpkg inputs (not the run-local derived cache).
+        CREATE TABLE IF NOT EXISTS refpkgs (
+            refpkg        TEXT NOT NULL,
+            refpkg_dir    TEXT,
+            hmmname       TEXT,
+            hmmlen        BIGINT,
+            aln_source    TEXT,
+            tree_source   TEXT,
+            hmm_source    TEXT
+        );
+
+        -- all run-time options as key/value (so new CLI flags need no schema
+        -- change). One row per (refpkg, param); params also include metadata
+        -- like pipp_version, run_datetime, command_line, query.
+        CREATE TABLE IF NOT EXISTS run_params (
+            refpkg TEXT NOT NULL,
+            param  TEXT NOT NULL,
+            value  TEXT
+        );
+
+        -- resolved path + version of each external tool used by the run.
+        CREATE TABLE IF NOT EXISTS software (
+            refpkg  TEXT NOT NULL,
+            name    TEXT NOT NULL,
+            path    TEXT,
+            version TEXT
+        );
         "#,
     )?;
     Ok(())

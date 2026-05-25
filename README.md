@@ -151,11 +151,15 @@ $ PiPP [options] -q <query fasta> -r <refpkg dir(s)> -o <output dir>
 
 At the end of a run, `pipp_util import` loads three TSVs from each `result/<refpkg>/` into `result/<refpkg>/pipp.duckdb`:
 
-| table              | source TSV                              | grain                                |
+| table              | source                                   | grain                                |
 |--------------------|------------------------------------------|--------------------------------------|
 | `assignments`      | `assign/per_query.tsv`                   | one row per (query, taxopath)        |
 | `aa_features`      | `feature/aa/feature.tsv`                 | one row per query                    |
 | `aligned_positions`| `alignment/aligned_position.tsv`         | one row per (query, position_label)  |
+| `jplace_clamps`    | `placement/*.clamp.tsv`                  | one row per sanitized jplace (only when clamp-jplace fixed non-finite/negative-branch values) |
+| `refpkgs`          | `refpkg/<name>/backbone.json`            | one row per refpkg (identity + source provenance: refpkg_dir, hmmname, hmmlen, aln/tree/hmm source paths) |
+| `run_params`       | `run_params.json`                        | one row per (refpkg, option) — all run-time options as key/value, plus pipp_version, run_datetime, command_line, query |
+| `software`         | `run_params.json`                        | one row per external tool (name, resolved path, version) |
 
 `aligned_positions` is stored in long format: the dynamic per-position columns from the TSV (driven by the refpkg's `position.tsv`) become rows keyed by `pos_label`.
 

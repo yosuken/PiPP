@@ -15,9 +15,54 @@ pub struct Args {
     #[arg(long)]
     pub refpkg: Option<String>,
 
+    /// Path to the refpkg's backbone.json (validate_refpkg metadata). When
+    /// given and present, one row is loaded into the refpkgs table.
+    #[arg(long = "refpkg-json")]
+    pub refpkg_json: Option<PathBuf>,
+
+    /// Path to run_params.json ({params:{...}, software:[...]}). When given and
+    /// present, loads run-time options into run_params and tool path/version
+    /// into the software table.
+    #[arg(long = "run-json")]
+    pub run_json: Option<PathBuf>,
+
     /// Overwrite an existing DB file
     #[arg(long)]
     pub overwrite: bool,
+}
+
+/// run_params.json: every run-time option as key/value plus per-tool metadata.
+#[derive(serde::Deserialize)]
+struct RunJson {
+    #[serde(default)]
+    params: std::collections::BTreeMap<String, String>,
+    #[serde(default)]
+    software: Vec<SoftwareEntry>,
+}
+
+#[derive(serde::Deserialize)]
+struct SoftwareEntry {
+    name: String,
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
+}
+
+/// Subset of validate_refpkg's backbone.json that is worth persisting:
+/// identity + provenance. The run-local derived paths (faln/ftreME/ppdir...)
+/// are intentionally omitted — they are cache locations, not provenance.
+#[derive(serde::Deserialize)]
+struct BackboneMeta {
+    refpkg: Option<String>,
+    hmmname: Option<String>,
+    hmmlen: Option<String>, // stored as a string in backbone.json
+    #[serde(rename = "falnO")]
+    faln_o: Option<String>,
+    #[serde(rename = "ftreO")]
+    ftre_o: Option<String>,
+    #[serde(rename = "fhmmO")]
+    fhmm_o: Option<String>,
 }
 
 pub fn run(args: Args) -> Result<()> {
@@ -81,6 +126,26 @@ pub fn run(args: Args) -> Result<()> {
         eprintln!("imported {} rows into jplace_clamps", n);
     }
 
+    // refpkg identity/provenance from backbone.json (when supplied).
+    if let Some(json) = &args.refpkg_json {
+        if json.is_file() {
+            import_refpkg_meta(&conn, &refpkg, json)?;
+            eprintln!("imported 1 row into refpkgs");
+        } else {
+            eprintln!("skip refpkgs: {} not found", json.display());
+        }
+    }
+
+    // run-time options + software path/version from run_params.json.
+    if let Some(json) = &args.run_json {
+        if json.is_file() {
+            let (np, ns) = import_run_json(&conn, &refpkg, json)?;
+            eprintln!("imported {np} rows into run_params, {ns} into software");
+        } else {
+            eprintln!("skip run_params/software: {} not found", json.display());
+        }
+    }
+
     eprintln!("wrote {}", db_path.display());
     Ok(())
 }
@@ -113,6 +178,48 @@ fn import_jplace_clamps(conn: &Connection, refpkg: &str, placement_dir: &Path) -
     }
     app.flush()?;
     Ok(n)
+}
+
+fn import_refpkg_meta(conn: &Connection, refpkg: &str, json_path: &Path) -> Result<()> {
+    let txt = std::fs::read_to_string(json_path)
+        .with_context(|| format!("reading {}", json_path.display()))?;
+    let m: BackboneMeta = serde_json::from_str(&txt)
+        .with_context(|| format!("parsing backbone.json: {}", json_path.display()))?;
+    let hmmlen: Option<i64> = m.hmmlen.as_deref().and_then(|s| s.trim().parse().ok());
+    let mut app = conn.appender("refpkgs")?;
+    app.append_row(params![
+        refpkg, m.refpkg, m.hmmname, hmmlen, m.faln_o, m.ftre_o, m.fhmm_o
+    ])?;
+    app.flush()?;
+    Ok(())
+}
+
+fn import_run_json(conn: &Connection, refpkg: &str, json_path: &Path) -> Result<(usize, usize)> {
+    let txt = std::fs::read_to_string(json_path)
+        .with_context(|| format!("reading {}", json_path.display()))?;
+    let r: RunJson = serde_json::from_str(&txt)
+        .with_context(|| format!("parsing run_params.json: {}", json_path.display()))?;
+
+    let mut np = 0usize;
+    {
+        let mut app = conn.appender("run_params")?;
+        for (k, v) in &r.params {
+            app.append_row(params![refpkg, k, v])?;
+            np += 1;
+        }
+        app.flush()?;
+    }
+
+    let mut ns = 0usize;
+    {
+        let mut app = conn.appender("software")?;
+        for s in &r.software {
+            app.append_row(params![refpkg, s.name, s.path, s.version])?;
+            ns += 1;
+        }
+        app.flush()?;
+    }
+    Ok((np, ns))
 }
 
 fn tsv_reader(path: &Path) -> Result<csv::Reader<std::fs::File>> {
@@ -425,6 +532,101 @@ mod tests {
             )
             .unwrap();
         assert_eq!(residues, "R");
+    }
+
+    // --- import_refpkg_meta ---
+
+    #[test]
+    fn import_refpkg_meta_loads_identity_and_provenance() {
+        let conn = fresh_conn();
+        let json = r#"{
+            "name": "subACV",
+            "refpkg": "/db/refpkg/rhodopsin/subACV",
+            "hmmlen": "229",
+            "hmmname": "rhodopsin.subACV",
+            "fhmmO": "/db/refpkg/rhodopsin/subACV/x.hmm",
+            "falnO": "/db/refpkg/rhodopsin/subACV/x.mfa",
+            "ftreO": "/db/refpkg/rhodopsin/subACV/x.tree",
+            "faln": "/db/refpkg/rhodopsin/subACV/derived/backbone.mfa",
+            "ppdir": "/db/refpkg/rhodopsin/subACV/derived/for_pplacer"
+        }"#;
+        let f = tempfile::Builder::new().suffix(".json").tempfile().unwrap();
+        std::fs::write(f.path(), json).unwrap();
+
+        import_refpkg_meta(&conn, "subACV", f.path()).unwrap();
+        assert_eq!(count(&conn, "refpkgs"), 1);
+
+        let (rp, dir, name, len, aln, tree, hmm): (
+            String,
+            String,
+            String,
+            i64,
+            String,
+            String,
+            String,
+        ) = conn
+            .query_row(
+                "SELECT refpkg, refpkg_dir, hmmname, hmmlen, aln_source, tree_source, hmm_source FROM refpkgs",
+                [],
+                |r| {
+                    Ok((
+                        r.get(0)?,
+                        r.get(1)?,
+                        r.get(2)?,
+                        r.get(3)?,
+                        r.get(4)?,
+                        r.get(5)?,
+                        r.get(6)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(rp, "subACV");
+        assert_eq!(dir, "/db/refpkg/rhodopsin/subACV");
+        assert_eq!(name, "rhodopsin.subACV");
+        assert_eq!(len, 229);
+        assert_eq!(aln, "/db/refpkg/rhodopsin/subACV/x.mfa");
+        assert_eq!(tree, "/db/refpkg/rhodopsin/subACV/x.tree");
+        assert_eq!(hmm, "/db/refpkg/rhodopsin/subACV/x.hmm");
+    }
+
+    #[test]
+    fn import_run_json_loads_params_and_software() {
+        let conn = fresh_conn();
+        let json = r#"{
+            "params": {"minhmmlen":"174","evalue":"1e-5","maxseqlen":"100000","placer":"pplacer"},
+            "software": [
+                {"name":"hmmsearch","path":"/env/bin/hmmsearch","version":"HMMER 3.4"},
+                {"name":"pplacer","path":"/env/bin/pplacer","version":"ff7556d-dirty"}
+            ]
+        }"#;
+        let f = tempfile::Builder::new().suffix(".json").tempfile().unwrap();
+        std::fs::write(f.path(), json).unwrap();
+
+        let (np, ns) = import_run_json(&conn, "subACV", f.path()).unwrap();
+        assert_eq!(np, 4);
+        assert_eq!(ns, 2);
+        assert_eq!(count(&conn, "run_params"), 4);
+        assert_eq!(count(&conn, "software"), 2);
+
+        let v: String = conn
+            .query_row(
+                "SELECT value FROM run_params WHERE param='minhmmlen' AND refpkg='subACV'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(v, "174");
+
+        let (path, ver): (String, String) = conn
+            .query_row(
+                "SELECT path, version FROM software WHERE name='pplacer'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(path, "/env/bin/pplacer");
+        assert_eq!(ver, "ff7556d-dirty");
     }
 
     #[test]

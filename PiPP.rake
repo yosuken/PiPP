@@ -34,38 +34,34 @@ PrintStatus = lambda do |current, total, status, t|
   # STDOUT.flush
 end
 
+### Records each tool's path + version into $software (one entry per command)
+### so 01-7a.duckdb_import can persist them to the `software` table, while
+### still printing the human-readable version block to the run log.
+$software = []
 CheckVersion = lambda do |commands|
   commands.each{ |command|
-    str = case command
-    when "ruby"
-      %{which ruby && ruby -v 2>&1}
-    when "hmmsearch"
-      %{which hmmsearch && hmmsearch -h 2>&1 |head -n 2}
-    when "mafft"
-      %{which mafft && mafft -v 2>&1 |head -n 4 |tail -n 1}
-    when "gappa"
-      %{which gappa && gappa --version}
-    when "pplacer"
-      %{which pplacer && pplacer --version}
-    when "parallel"
-      %{which parallel && LANG=C parallel --version 2>&1 |head -n 1}
-    when "witch-ng"
-      %{echo #{WITCH_NG} && #{WITCH_NG} --version 2>&1}
-    when "run_apples.py"
-      %{which run_apples.py && run_apples.py --version 2>&1 |tail -n 1}
-    when "FastTreeMP"
-      %{which FastTreeMP && FastTreeMP -expert 2>&1 |head -n 1}
-    when "FastTree"
-      %{which FastTree && FastTree -expert 2>&1 |head -n 1}
-    when "epa-ng"
-      %{which epa-ng && epa-ng -v 2>&1}
+    pathcmd, vercmd = case command
+    when "ruby"          then ["which ruby",          %{ruby -v 2>&1}]
+    when "hmmsearch"     then ["which hmmsearch",     %{hmmsearch -h 2>&1 |head -n 2 |tail -n 1}]
+    when "mafft"         then ["which mafft",         %{mafft -v 2>&1 |head -n 4 |tail -n 1}]
+    when "gappa"         then ["which gappa",         %{gappa --version 2>&1 |head -n 1}]
+    when "pplacer"       then ["which pplacer",       %{pplacer --version 2>&1 |head -n 1}]
+    when "parallel"      then ["which parallel",      %{LANG=C parallel --version 2>&1 |head -n 1}]
+    when "witch-ng"      then ["echo #{WITCH_NG}",    %{#{WITCH_NG} --version 2>&1 |head -n 1}]
+    when "run_apples.py" then ["which run_apples.py", %{run_apples.py --version 2>&1 |tail -n 1}]
+    when "FastTreeMP"    then ["which FastTreeMP",    %{FastTreeMP -expert 2>&1 |head -n 1}]
+    when "FastTree"      then ["which FastTree",      %{FastTree -expert 2>&1 |head -n 1}]
+    when "epa-ng"        then ["which epa-ng",        %{epa-ng -v 2>&1 |head -n 1}]
     end
+    next unless pathcmd
+    path = `#{pathcmd} 2>/dev/null`.strip
+    ver  = path.empty? ? "" : `#{vercmd}`.strip
+    $software << { name: command, path: path, version: ver }
     puts ""
     puts "\e[1;32m===== check version: #{command}\e[0m"
     puts ""
-    puts "$ #{str}"
-    ### run
-    puts `#{str}`
+    puts "$ #{pathcmd} && #{vercmd}"
+    puts(path.empty? ? "(not found)" : "#{path}\n#{ver}")
     # STDOUT.flush
   }
 end
@@ -1299,14 +1295,47 @@ desc "01-7a.duckdb_import"
 task "01-7a.duckdb_import", ["step"] do |t, args|
   PrintStatus.call(args.step, NumStep, "START", t)
   (puts "Already done. Skipped." ; next) if File.exist?("#{Logdir}/#{t.name.split(":")[-1]}/exit") ### skip if already done
+  require 'json'
   outs = []
+
+  ### run-level provenance written once and imported into every refpkg DB:
+  ### all run-time options (run_params table) + each tool's path/version
+  ### (software table). Options are key-value so new flags need no schema change.
+  run_params = {
+    "pipp_version"      => ENV["pipp_version"].to_s,
+    "run_datetime"      => Time.now.strftime("%Y-%m-%d %H:%M:%S %z"),
+    "command_line"      => ENV["command_line"].to_s,
+    "query"             => Fque.to_s,
+    "outdir"            => Odir.to_s,
+    "evalue"            => ENV["evalue"].to_s,
+    "evaluedom"         => ENV["evaluedom"].to_s,
+    "minseqlen"         => ENV["minseqlen"].to_s,
+    "maxseqlen"         => MaxSeqLen.to_s,
+    "minhmmlen"         => ENV["minhmmlen"].to_s,
+    "minhmmcov"         => ENV["minhmmcov"].to_s,
+    "minalilen"         => ENV["minalilen"].to_s,
+    "minalicov"         => ENV["minalicov"].to_s,
+    "aligner"           => ENV["aligner"].to_s,
+    "mafft_method"      => ENV["mafft_method"].to_s,
+    "hmm_size_lb"       => (ENV["hmm_size_lb"].to_s.empty? ? "auto(backbone_leaf/20)" : ENV["hmm_size_lb"]),
+    "placer"            => ENV["placer"].to_s,
+    "epa_ng_model"      => ENV["epa_ng_model"].to_s,
+    "chunk_size"        => ENV["chunk_size"].to_s,
+    "ncpus"             => ENV["ncpus"].to_s,
+    "copy_refpkg"       => (ENV["copy_refpkg"] == "true").to_s,
+    "keep_intermediate" => (ENV["keep_intermediate"] == "true").to_s,
+    "only_detect"       => (ENV["only_detect"] == "true").to_s,
+  }
+  frun = "#{Odir}/run_params.json"
+  open(frun, "w"){ |fw| fw.puts({ "params" => run_params, "software" => $software }.to_json) }
 
   $fpkgs.each{ |pkg|
     bdir = "#{Resdir}/#{pkg[:name]}"
     next unless File.directory?(bdir)
 
     flog = "#{bdir}/pipp.duckdb.log"
-    outs << "#{PIPP_UTIL} import #{bdir} --refpkg #{pkg[:name]} --overwrite >#{flog} 2>&1"
+    fjsn = "#{Pkgdir}/#{pkg[:name]}/backbone.json"   ## validate_refpkg metadata -> refpkgs table
+    outs << "#{PIPP_UTIL} import #{bdir} --refpkg #{pkg[:name]} --refpkg-json #{fjsn} --run-json #{frun} --overwrite >#{flog} 2>&1"
   }
 
   WriteBatch.call(t, Jobdir, outs)

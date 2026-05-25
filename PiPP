@@ -469,7 +469,9 @@ class PiPP
       "ncpus"          => @options[:ncpus].to_s,
       "only_detect"       => @options[:only_detect] ? "true" : "",
       "keep_intermediate" => @options[:keep_intermediate] ? "true" : "",
-      "copy_refpkg"       => @options[:copy_refpkg] ? "true" : ""
+      "copy_refpkg"       => @options[:copy_refpkg] ? "true" : "",
+      "pipp_version"      => VERSION,
+      "command_line"      => @incmd.to_s
       # "trim_option"    => @options[:trim_option],
     }
     
