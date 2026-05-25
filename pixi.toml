@@ -8,7 +8,7 @@ version = "0.1.0"
 # priority (same reason install.sh uses --channel-priority flexible).
 channel-priority = "disabled"
 
-# point PiPP at the bundled binary so `pixi run PiPP` finds pipp_util
+# point pipp at the bundled binary so `pixi run ./pipp` finds pipp_util
 # regardless of cwd (build it with `pixi run -e build build`).
 [activation.env]
 PIPP_UTIL_BIN = "/lustre/aptmp/yosuke/dev/tool/PiPP/rust/target/release/pipp_util"
