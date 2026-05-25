@@ -48,8 +48,12 @@ When cutting a release `vX.Y.Z`:
 - `ci/run.sh` (local-runnable) and `.github/workflows/ci.yml` covering
   Ruby syntax, Rust fmt/clippy/build, and a self-contained `pipp_util`
   smoke test using synthetic TSVs.
-- Lowercase `pipp` launcher (symlink to `PiPP`); the entry point now resolves
-  symlinks (`File.realpath`) so it works when invoked through a `bin/` symlink.
+- Entry point now resolves symlinks (`File.realpath`) so it works when invoked
+  through a `bin/` symlink or under a different name. This lets a lowercase
+  `pipp` alias be created at install time (PATH launcher, or a guarded
+  `$PREFIX/bin` symlink for Bioconda) without committing a `pipp` file to the
+  repo — `PiPP` and `pipp` case-fold to the same name and would collide on
+  case-insensitive filesystems (macOS/Windows). The repo keeps `PiPP` only.
 
 ### Changed
 - `-q` now accepts a single FASTA only. Glob patterns and
