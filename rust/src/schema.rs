@@ -66,6 +66,29 @@ pub fn create_all(conn: &Connection) -> Result<()> {
             n_neg_branch BIGINT NOT NULL
         );
 
+        -- full jplace JSON produced by the selected placer, one row per
+        -- result/<refpkg>/placement/*.jplace file.
+        CREATE TABLE IF NOT EXISTS jplaces (
+            refpkg  TEXT NOT NULL,
+            jplace  TEXT NOT NULL,
+            content TEXT NOT NULL
+        );
+
+        -- task-level completion state captured from log/tasks/<task>/exit and
+        -- GNU parallel joblogs while they still exist before cleanup.
+        CREATE TABLE IF NOT EXISTS task_runs (
+            refpkg        TEXT NOT NULL,
+            task          TEXT NOT NULL,
+            status        TEXT NOT NULL,
+            exit_code     INTEGER,
+            n_jobs        BIGINT,
+            started_epoch DOUBLE,
+            runtime_sec   DOUBLE,
+            finished_at   TEXT,
+            exit_marker   TEXT,
+            parallel_log  TEXT
+        );
+
         -- one row per refpkg: identity + provenance taken from the
         -- validate_refpkg metadata (backbone.json). The source_* columns point
         -- at the original refpkg inputs (not the run-local derived cache).

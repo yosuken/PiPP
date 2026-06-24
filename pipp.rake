@@ -1,6 +1,9 @@
 
 STDOUT.sync = true; STDERR.sync = true
 
+require 'csv'
+require 'open3'
+
 # {{{ procedures
 WriteBatch  = lambda do |t, jobdir, outs|
   jdir = "#{jobdir}/#{t.name.split(":")[-1]}"; mkdir_p jdir unless File.directory?(jdir)
@@ -24,6 +27,40 @@ RunBatch  = lambda do |t, jobdir, ncpu, logdir|
     sh "TMPDIR=#{tdir} parallel --jobs #{ncpu} --joblog #{ldir}/parallel.log <#{fin}"
   }
   open("#{ldir}/exit", "w"){ |fw| fw.puts "exit with status 0 at #{Time.now.strftime("%Y-%m-%d_%H:%M:%S")}" }
+end
+
+CleanupResult = lambda do |resdir|
+  next unless File.directory?(resdir)
+
+  Dir["#{resdir}/*"].sort.each{ |pkgdir|
+    next unless File.directory?(pkgdir)
+
+    keep = %w[
+      pipp.duckdb
+      pipp.duckdb.log
+      assign/profile.tsv
+      assign/per_query.tsv
+      alignment/aligned_position.tsv
+      feature/aa/feature.tsv
+    ]
+    keep += Dir["#{pkgdir}/placement/*.jplace"].map{ |p| p.sub(%r|^#{Regexp.escape(pkgdir)}/|, "") }
+
+    tmp = "#{pkgdir}/.pipp_cleanup_keep"
+    rm_rf tmp if File.directory?(tmp)
+    mkdir_p tmp
+
+    keep.uniq.each{ |rel|
+      src = "#{pkgdir}/#{rel}"
+      next unless File.file?(src)
+      dst = "#{tmp}/#{rel}"
+      mkdir_p File.dirname(dst)
+      mv src, dst
+    }
+
+    Dir["#{pkgdir}/*"].each{ |path| rm_rf path unless path == tmp }
+    Dir["#{tmp}/*"].each{ |path| mv path, pkgdir }
+    rm_rf tmp
+  }
 end
 
 PrintStatus = lambda do |current, total, status, t|
@@ -205,6 +242,166 @@ task :default do
   $fpkgs    = []
   $rnames   = {}
   $ex_lvs   = []
+  resumed_from_duckdb = false
+
+  sql_quote = lambda{ |s| "'#{s.to_s.gsub("'", "''")}'" }
+
+  duckdb_csv = lambda do |db, sql|
+    out, err, st = Open3.capture3("duckdb", db, "-csv", "-header", "-c", sql)
+    raise("#{Errmsg} duckdb query failed for #{db}: #{err}") unless st.success?
+    CSV.parse(out, headers: true)
+  end
+
+  write_fasta = lambda do |fout, rows, id_col, seq_col|
+    mkdir_p File.dirname(fout)
+    open(fout, "w"){ |fw|
+      rows.each{ |row|
+        id  = row[id_col].to_s
+        seq = row[seq_col].to_s
+        next if id.empty? or seq.empty?
+        fw.puts ">#{id}"
+        fw.puts seq.scan(/.{1,80}/)
+      }
+    }
+  end
+
+  mark_task_done = lambda do |task|
+    ldir = "#{Logdir}/#{task}"
+    mkdir_p ldir
+    open("#{ldir}/exit", "w"){ |fw|
+      fw.puts "exit with status 0 at resume-from-duckdb #{Time.now.strftime("%Y-%m-%d_%H:%M:%S")}"
+    }
+  end
+
+  resume_from_duckdb = lambda do
+    next unless OdirExist == "true"
+    next if $fpkgs.empty?
+
+    restored_pkgs = []
+    success_sets = []
+    $fpkgs.each{ |pkg|
+      db = "#{Resdir}/#{pkg[:name]}/pipp.duckdb"
+      next unless File.file?(db)
+      ref = sql_quote.call(pkg[:name])
+
+      begin
+        hits = duckdb_csv.call(db, %{
+          SELECT protein, protein_len, protein_info, hmm_name, hmm_acc, hmm_desc,
+                 hmm_len, score, bias, c_evalue, i_evalue, hmm_fm, hmm_to,
+                 ali_fm, ali_to, env_fm, env_to, acc, full_evalue, full_score,
+                 link, region_name
+          FROM prefilter_hits
+          WHERE refpkg = #{ref}
+          ORDER BY region_name
+        })
+        whole = duckdb_csv.call(db, %{
+          SELECT query_name, sequence
+          FROM query_whole
+          WHERE refpkg = #{ref}
+          ORDER BY query_name
+        })
+        region = duckdb_csv.call(db, %{
+          SELECT region_name, sequence
+          FROM query_region
+          WHERE refpkg = #{ref}
+          ORDER BY region_name
+        })
+        aligned = duckdb_csv.call(db, %{
+          SELECT region_name, sequence
+          FROM query_aligned
+          WHERE refpkg = #{ref}
+          ORDER BY region_name
+        })
+        jplaces = duckdb_csv.call(db, %{
+          SELECT jplace, content
+          FROM jplaces
+          WHERE refpkg = #{ref}
+          ORDER BY jplace
+        })
+        tasks = duckdb_csv.call(db, %{
+          SELECT task
+          FROM task_runs
+          WHERE refpkg = #{ref} AND status = 'success' AND exit_code = 0
+          ORDER BY task
+        }).map{ |row| row["task"] }
+      rescue => e
+        puts "#{Warmsg} resume-from-duckdb failed for #{pkg[:name]}: #{e.message}"
+        next
+      end
+
+      next if hits.empty? or whole.empty? or region.empty? or aligned.empty? or jplaces.empty?
+
+      pdir = "#{PreFildir}/#{$fque[:name]}/parsed"
+      mkdir_p pdir
+      open("#{pdir}/best-hit.tsv", "w"){ |fw|
+        fw.puts %w[
+          protein length(aa) protein_info hmm_name hmm_acc hmm_desc hmm_len
+          score bias c-Evalue i-Evalue hmm.fm hmm.to ali.fm ali.to env.fm
+          env.to acc full-Evalue full-score link region_name
+        ]*"\t"
+        hits.each{ |row|
+          fw.puts [
+            row["protein"], row["protein_len"], row["protein_info"],
+            row["hmm_name"], row["hmm_acc"], row["hmm_desc"], row["hmm_len"],
+            row["score"], row["bias"], row["c_evalue"], row["i_evalue"],
+            row["hmm_fm"], row["hmm_to"], row["ali_fm"], row["ali_to"],
+            row["env_fm"], row["env_to"], row["acc"], row["full_evalue"],
+            row["full_score"], row["link"], row["region_name"]
+          ].map{ |v| v.to_s }*"\t"
+        }
+      }
+
+      evs = duckdb_csv.call(db, %{
+        SELECT seq, i_evalue
+        FROM prefilter_evalues
+        WHERE refpkg = #{ref}
+        ORDER BY seq
+      })
+      open("#{pdir}/evalues.tsv", "w"){ |fw|
+        fw.puts ["seq", pkg[:hmmname]]*"\t"
+        evs.each{ |row| fw.puts [row["seq"], row["i_evalue"]]*"\t" }
+      }
+
+      %w[whole region].zip([whole, region], ["query_name", "region_name"]){ |type, rows, id_col|
+        pre = "#{PreFildir}/#{$fque[:name]}/seq/#{type}/#{pkg[:name]}/#{$fque[:name]}.fa"
+        res = "#{Resdir}/#{pkg[:name]}/seq/#{type}.fa"
+        write_fasta.call(pre, rows, id_col, "sequence")
+        write_fasta.call(res, rows, id_col, "sequence")
+      }
+
+      adir = "#{Resdir}/#{pkg[:name]}/alignment"
+      write_fasta.call("#{adir}/aligned_wo_ref.fa", aligned, "region_name", "sequence")
+      mkdir_p adir
+      open("#{adir}/aligned.fa", "w"){ |fw|
+        fw.write IO.read(pkg[:faln])
+        fw.puts unless IO.read(pkg[:faln]).end_with?("\n")
+        aligned.each{ |row|
+          fw.puts ">#{row["region_name"]}"
+          fw.puts row["sequence"].to_s.scan(/.{1,80}/)
+        }
+      }
+
+      pldir = "#{Resdir}/#{pkg[:name]}/placement"
+      mkdir_p pldir
+      jplaces.each{ |row|
+        open("#{pldir}/#{row["jplace"]}", "w"){ |fw| fw.write row["content"].to_s }
+      }
+
+      restored_pkgs << pkg[:name]
+      success_sets << tasks
+    }
+
+    if restored_pkgs.size == $fpkgs.size and !success_sets.empty?
+      skippable = success_sets.reduce(success_sets[0]){ |a, b| a & b }
+      skippable << "01-2c.split_fasta" # no parallel joblog, but its outputs are restored above
+      skippable -= ["01-7a.duckdb_import"]
+      skippable.uniq!
+      skippable.each{ |task| mark_task_done.call(task) }
+      puts "#{Sccmsg} resume-from-duckdb restored #{restored_pkgs.size} refpkg(s); #{skippable.size} completed task marker(s) recreated."
+    elsif restored_pkgs.size > 0
+      puts "#{Warmsg} resume-from-duckdb restored #{restored_pkgs.size}/#{$fpkgs.size} refpkg(s); task markers were not recreated."
+    end
+  end
 
   ## validate extract_levels
   ex_lvs_errmsg = "#{Errmsg} --extract-levels '#{Ex_lvs}' should be either -1, 0, positive integer, or comma separeted positive integers."
@@ -222,6 +419,10 @@ task :default do
   ### run
   NumStep  = Tasks.size
   Tasks.each.with_index(1){ |task, idx|
+    if !resumed_from_duckdb and task == "01-2a.hmmsearch"
+      resume_from_duckdb.call
+      resumed_from_duckdb = true
+    end
     Rake::Task[task].invoke(idx)
     # STDOUT.flush
   }
@@ -229,6 +430,7 @@ task :default do
   ### cleanup intermediate dirs (suppress with --keep-intermediate)
   unless KeepIntermediate
     puts "\n\e[1;32m===== cleanup intermediate files\e[0m"
+    CleanupResult.call(Resdir)
     [Predir, Cnkdir, Jobdir, Logdir].each{ |d| rm_rf d if File.directory?(d) }
   end
 end
@@ -548,6 +750,15 @@ task "01-2e.prepare_for_placement", ["step"] do |t, args|
     next if Dir[fas].size == 0
     npkg += 1
   }
+
+  if npkg == 0
+    Npara = 1
+    NcpuP = 1
+    puts "###"
+    puts "### no query passed prefilter; skip placement tasks."
+    puts "###"
+    next
+  end
 
   Npara = [Ncpu, npkg].min
 
@@ -1343,7 +1554,7 @@ task "01-7a.duckdb_import", ["step"] do |t, args|
     if File.exist?("#{pdir}/best-hit.tsv")
       pre = " --hmm-name '#{pkg[:hmmname]}' --besthit-tsv #{pdir}/best-hit.tsv --evalues #{pdir}/evalues.tsv"
     end
-    outs << "#{PIPP_UTIL} import #{bdir} --refpkg #{pkg[:name]} --refpkg-json #{fjsn} --run-json #{frun}#{pre} --overwrite >#{flog} 2>&1"
+    outs << "#{PIPP_UTIL} import #{bdir} --refpkg #{pkg[:name]} --refpkg-json #{fjsn} --run-json #{frun} --task-log-dir #{Logdir}#{pre} --overwrite >#{flog} 2>&1"
   }
 
   WriteBatch.call(t, Jobdir, outs)

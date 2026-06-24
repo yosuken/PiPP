@@ -40,6 +40,11 @@ pub struct Args {
     #[arg(long = "evalues")]
     pub evalues: Option<PathBuf>,
 
+    /// log/tasks directory for this PiPP run. When present, task exit markers
+    /// and GNU parallel joblogs are loaded into task_runs.
+    #[arg(long = "task-log-dir")]
+    pub task_log_dir: Option<PathBuf>,
+
     /// Overwrite an existing DB file
     #[arg(long)]
     pub overwrite: bool,
@@ -140,6 +145,11 @@ pub fn run(args: Args) -> Result<()> {
         eprintln!("imported {} rows into jplace_clamps", n);
     }
 
+    let n = import_jplaces(&conn, &refpkg, &result_dir.join("placement"))?;
+    if n > 0 {
+        eprintln!("imported {} rows into jplaces", n);
+    }
+
     // refpkg identity/provenance from backbone.json (when supplied).
     if let Some(json) = &args.refpkg_json {
         if json.is_file() {
@@ -157,6 +167,15 @@ pub fn run(args: Args) -> Result<()> {
             eprintln!("imported {np} rows into run_params, {ns} into software");
         } else {
             eprintln!("skip run_params/software: {} not found", json.display());
+        }
+    }
+
+    if let Some(task_log_dir) = &args.task_log_dir {
+        if task_log_dir.is_dir() {
+            let n = import_task_runs(&conn, &refpkg, task_log_dir)?;
+            eprintln!("imported {n} rows into task_runs");
+        } else {
+            eprintln!("skip task_runs: {} not found", task_log_dir.display());
         }
     }
 
@@ -220,6 +239,135 @@ fn import_jplace_clamps(conn: &Connection, refpkg: &str, placement_dir: &Path) -
             app.append_row(params![refpkg, jplace, nf, nb])?;
             n += 1;
         }
+    }
+    app.flush()?;
+    Ok(n)
+}
+
+fn import_jplaces(conn: &Connection, refpkg: &str, placement_dir: &Path) -> Result<usize> {
+    if !placement_dir.is_dir() {
+        return Ok(0);
+    }
+    let mut app = conn.appender("jplaces")?;
+    let mut n = 0usize;
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(placement_dir)
+        .with_context(|| format!("reading {}", placement_dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|ext| ext == "jplace"))
+        .collect();
+    entries.sort();
+    for path in entries {
+        let jplace = path
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.display().to_string());
+        let content = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        app.append_row(params![refpkg, jplace, content])?;
+        n += 1;
+    }
+    app.flush()?;
+    Ok(n)
+}
+
+fn import_task_runs(conn: &Connection, refpkg: &str, task_log_dir: &Path) -> Result<usize> {
+    let mut app = conn.appender("task_runs")?;
+    let mut n = 0usize;
+    let mut entries: Vec<PathBuf> = std::fs::read_dir(task_log_dir)
+        .with_context(|| format!("reading {}", task_log_dir.display()))?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.is_dir())
+        .collect();
+    entries.sort();
+
+    for dir in entries {
+        let task = dir
+            .file_name()
+            .map(|s| s.to_string_lossy().into_owned())
+            .unwrap_or_else(|| dir.display().to_string());
+        let exit_path = dir.join("exit");
+        let exit_marker = std::fs::read_to_string(&exit_path)
+            .ok()
+            .map(|s| s.trim().to_string());
+        let finished_at = exit_marker
+            .as_deref()
+            .and_then(|s| s.rsplit_once(" at ").map(|(_, t)| t.to_string()));
+
+        let parallel_path = dir.join("parallel.log");
+        let parallel_log = parallel_path
+            .is_file()
+            .then(|| parallel_path.to_string_lossy().into_owned());
+
+        let mut n_jobs: i64 = 0;
+        let mut started_epoch: Option<f64> = None;
+        let mut runtime_sec: f64 = 0.0;
+        let mut max_exit: Option<i64> = None;
+        if parallel_path.is_file() {
+            let mut rdr = csv::ReaderBuilder::new()
+                .delimiter(b'\t')
+                .has_headers(true)
+                .flexible(true)
+                .from_path(&parallel_path)
+                .with_context(|| format!("opening TSV: {}", parallel_path.display()))?;
+            let hdr = header_index(&rdr.headers()?.clone());
+            let idx = |name: &str| -> Option<usize> { hdr.get(name).copied() };
+            for rec in rdr.records() {
+                let rec = rec.with_context(|| format!("reading {}", parallel_path.display()))?;
+                n_jobs += 1;
+                if let Some(i) = idx("Starttime") {
+                    if let Some(t) = rec.get(i).and_then(|s| s.parse::<f64>().ok()) {
+                        started_epoch = Some(started_epoch.map_or(t, |old| old.min(t)));
+                    }
+                }
+                if let Some(i) = idx("Runtime") {
+                    runtime_sec += rec
+                        .get(i)
+                        .and_then(|s| s.parse::<f64>().ok())
+                        .unwrap_or(0.0);
+                }
+                if let Some(i) = idx("Exitval") {
+                    if let Some(v) = rec.get(i).and_then(|s| s.parse::<i64>().ok()) {
+                        max_exit = Some(max_exit.map_or(v, |old| old.max(v)));
+                    }
+                }
+            }
+        }
+
+        // The currently running duckdb_import task creates its log directory
+        // before this importer starts, but its joblog/exit marker are not
+        // complete yet. Do not persist an incomplete placeholder row.
+        if exit_marker.is_none() && n_jobs == 0 {
+            continue;
+        }
+
+        let exit_code = match (exit_marker.is_some(), max_exit) {
+            (_, Some(v)) if v != 0 => Some(v),
+            (true, _) => Some(0),
+            (_, Some(v)) => Some(v),
+            _ => None,
+        };
+        let status = match (exit_marker.is_some(), exit_code) {
+            (true, Some(0)) => "success",
+            (_, Some(v)) if v != 0 => "failed",
+            (false, Some(0)) => "jobs_success_no_marker",
+            _ => "unknown",
+        };
+        let n_jobs_opt = (n_jobs > 0).then_some(n_jobs);
+        let runtime_opt = (n_jobs > 0).then_some(runtime_sec);
+
+        app.append_row(params![
+            refpkg,
+            task,
+            status,
+            exit_code,
+            n_jobs_opt,
+            started_epoch,
+            runtime_opt,
+            finished_at,
+            exit_marker,
+            parallel_log,
+        ])?;
+        n += 1;
     }
     app.flush()?;
     Ok(n)
