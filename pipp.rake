@@ -41,6 +41,7 @@ CleanupResult = lambda do |resdir, keep_detect=false|
       assign/profile.tsv
       assign/per_query.tsv
       alignment/aligned_position.tsv
+      detect/summary.tsv
       feature/aa/feature.tsv
     ]
     keep += %w[seq/whole.fa seq/region.fa] if keep_detect
@@ -433,7 +434,9 @@ task :default do
   unless KeepIntermediate
     puts "\n\e[1;32m===== cleanup intermediate files\e[0m"
     CleanupResult.call(Resdir, OnlyDetect)
-    [Predir, Cnkdir, Jobdir, Logdir].each{ |d| rm_rf d if File.directory?(d) }
+    cleanup_dirs = [Predir, Cnkdir, Jobdir, Logdir]
+    cleanup_dirs << Pkgdir if OnlyDetect
+    cleanup_dirs.each{ |d| rm_rf d if File.directory?(d) }
   end
 end
 # }}} default (run all tasks)
@@ -728,14 +731,22 @@ task "01-2d.copy_detected", ["step"] do |t, args|
   outs = []
 
   $fpkgs.each{ |pkg|
-    %w|whole region|.each{ |type|
-      fin  = "#{PreFildir}/#{$fque[:name]}/seq/#{type}/#{pkg[:name]}/#{$fque[:name]}.fa"
-      next unless File.exist?(fin)
-
-      odir = "#{Resdir}/#{pkg[:name]}/seq"; mkdir_p odir unless File.directory?(odir)
-      fout = "#{odir}/#{type}.fa"
-      outs << "cp #{fin} #{fout}"
-    }
+    seqdir = "#{Resdir}/#{pkg[:name]}/seq"
+    detdir = "#{Resdir}/#{pkg[:name]}/detect"
+    fwhole = "#{PreFildir}/#{$fque[:name]}/seq/whole/#{pkg[:name]}/#{$fque[:name]}.fa"
+    fregion = "#{PreFildir}/#{$fque[:name]}/seq/region/#{pkg[:name]}/#{$fque[:name]}.fa"
+    owhole = "#{seqdir}/whole.fa"
+    oregion = "#{seqdir}/region.fa"
+    fsum = "#{detdir}/summary.tsv"
+    out = []
+    out << "mkdir -p #{seqdir} #{detdir}"
+    out << %Q|if [ -f #{fwhole} ]; then cp #{fwhole} #{owhole}; else : > #{owhole}; fi|
+    out << %Q|if [ -f #{fregion} ]; then cp #{fregion} #{oregion}; else : > #{oregion}; fi|
+    out << %Q{whole_n=$(grep -c '^>' #{owhole} || true)}
+    out << %Q{region_n=$(grep -c '^>' #{oregion} || true)}
+    out << %Q{status=$(if [ "$region_n" -gt 0 ]; then echo hit; else echo no_hit; fi)}
+    out << %Q{printf 'query\\trefpkg\\thmm_name\\twhole_hits\\tregion_hits\\tstatus\\n%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' '#{$fque[:name]}' '#{pkg[:name]}' '#{pkg[:hmmname]}' "$whole_n" "$region_n" "$status" > #{fsum}}
+    outs << out*" && "
   }
 
   WriteBatch.call(t, Jobdir, outs)
