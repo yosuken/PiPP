@@ -29,7 +29,7 @@ RunBatch  = lambda do |t, jobdir, ncpu, logdir|
   open("#{ldir}/exit", "w"){ |fw| fw.puts "exit with status 0 at #{Time.now.strftime("%Y-%m-%d_%H:%M:%S")}" }
 end
 
-CleanupResult = lambda do |resdir|
+CleanupResult = lambda do |resdir, keep_detect=false|
   next unless File.directory?(resdir)
 
   Dir["#{resdir}/*"].sort.each{ |pkgdir|
@@ -43,6 +43,7 @@ CleanupResult = lambda do |resdir|
       alignment/aligned_position.tsv
       feature/aa/feature.tsv
     ]
+    keep += %w[seq/whole.fa seq/region.fa] if keep_detect
     keep += Dir["#{pkgdir}/placement/*.jplace"].map{ |p| p.sub(%r|^#{Regexp.escape(pkgdir)}/|, "") }
 
     tmp = "#{pkgdir}/.pipp_cleanup_keep"
@@ -141,6 +142,7 @@ task :default do
   Ex_lvs       = ENV["extract_levels"]    ## clade/taxonomy level for 'gappa prepare extract' (default: 0)
   Placer       = ENV["placer"]            ## pplacer|apples-2|epa-ng
   KeepIntermediate = ENV["keep_intermediate"] == "true"  ## keep prefilter/chunks/batch/log/tasks after run
+  OnlyDetect   = ENV["only_detect"] == "true"
   Z            = 1_000_000                ## hmmsearch data size for evalue calculation
   # Trim_opt     = ENV["trim_option"]   ## 'merge' (merge regions of hmmserach hits)  or 'largest' (take largest hit) (default: merge)
 
@@ -155,7 +157,7 @@ task :default do
   tasks << "01-2c.split_fasta"
   tasks << "01-2d.copy_detected"
 
-  if ENV["only_detect"] != "true"
+  if !OnlyDetect
     tasks << "01-2e.prepare_for_placement"
     tasks << "01-3a.chunkify"
 
@@ -430,7 +432,7 @@ task :default do
   ### cleanup intermediate dirs (suppress with --keep-intermediate)
   unless KeepIntermediate
     puts "\n\e[1;32m===== cleanup intermediate files\e[0m"
-    CleanupResult.call(Resdir)
+    CleanupResult.call(Resdir, OnlyDetect)
     [Predir, Cnkdir, Jobdir, Logdir].each{ |d| rm_rf d if File.directory?(d) }
   end
 end
@@ -526,7 +528,7 @@ task "01-1b-A.validate_refpkg", ["step"] do |t, args|
     fpos  = Dir["#{rpkg}/position.tsv"]
 
     raise("#{Errmsg} #{rpkg} is not a directory.") unless File.directory?(rpkg)
-    raise("#{Errmsg} #{rpkg} does not contain fasta file. #{rpkg}/*{.fa|.mfa|.faa|.fasta} should exist.") if fa.size == 0
+    raise("#{Errmsg} #{rpkg} does not contain fasta file. #{rpkg}/*{.fa|.mfa|.faa|.fasta} should exist.") if !OnlyDetect && fa.size == 0
     raise("#{Errmsg} #{rpkg} contains multiple fasta files. #{rpkg}/*{.fa|.mfa|.faa|.fasta} should be only one.") if fa.size > 1
     raise("#{Errmsg} #{rpkg} contains multiple tree files. #{rpkg}/*{.tree|.nwk|.newick} should be only one.") if ftre.size > 1
     raise("#{Errmsg} #{rpkg} does not contain .hmm file. #{rpkg}/*.hmm should exist.") if fhmm.size == 0
@@ -546,9 +548,12 @@ task "01-1b-A.validate_refpkg", ["step"] do |t, args|
 
     odir = "#{Pkgdir}/#{name}"; mkdir_p odir unless File.directory?(odir)
     faln = "#{Pkgdir}/#{name}/backbone.mfa"
+    fjsn = "#{Pkgdir}/#{name}/backbone.json"
     flog = "#{Pkgdir}/#{name}/backbone.log"
-    if !File.exist?(faln)
-      outs << "ruby #{script} #{rpkg} #{odir} #{falnO} #{ftreO} #{fhmmO} #{ftaxO} #{fposO} >#{flog} 2>&1"
+    done_file = OnlyDetect ? fjsn : faln
+    if !File.exist?(done_file)
+      script_args = [rpkg, odir, falnO, ftreO, fhmmO, ftaxO, fposO, OnlyDetect].map{ |arg| arg.nil? ? "__nil__" : arg.to_s }
+      outs << "ruby #{script} #{script_args.join(' ')} >#{flog} 2>&1"
     end
   }
 

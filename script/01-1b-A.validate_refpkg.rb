@@ -6,8 +6,51 @@ require 'json'
 require 'digest'
 require 'fileutils'
 
-rpkg, odir, falnO, ftreO, fhmmO, ftaxO, fposO = ARGV
+rpkg, odir, falnO, ftreO, fhmmO, ftaxO, fposO, only_detect = ARGV
+falnO = nil if falnO == "__nil__"
+ftreO = nil if ftreO == "__nil__"
+fhmmO = nil if fhmmO == "__nil__"
+ftaxO = nil if ftaxO == "__nil__"
+fposO = nil if fposO == "__nil__"
+only_detect = only_detect == "true"
 name = File.basename(rpkg)
+
+raise "Error: missing HMM file argument" unless fhmmO && File.exist?(fhmmO)
+
+### parse LENG / NAME of fhmm (cheap; always done)
+hmmlen  = "0"
+hmmname = ""
+open(fhmmO){ |fr|
+  while l = fr.gets
+    if l =~ /^LENG\s+(\d+)/
+      hmmlen = $1
+    elsif l =~ /^NAME\s+(\S+)/
+      hmmname = $1
+    end
+  end
+}
+
+if only_detect
+  FileUtils.mkdir_p(odir)
+  fhmm = "#{odir}/backbone.hmm"
+  ftax = ftaxO ? "#{odir}/taxon.tsv" : nil
+  fpos = fposO ? "#{odir}/position.tsv" : nil
+
+  FileUtils.cp(fhmmO, fhmm)
+  FileUtils.cp(ftaxO, ftax) if ftaxO
+  FileUtils.cp(fposO, fpos) if fposO
+
+  h = { name: name, refpkg: rpkg, hmmlen: hmmlen, hmmname: hmmname,
+    fhmmO: fhmmO, ftaxO: ftaxO, fposO: fposO, falnO: falnO, ftreO: ftreO,
+    fhmm: fhmm, ftax: ftax, fpos: fpos, faln: falnO, ftre: ftreO,
+    ftreME: nil, flogME: nil,
+    ftreGM: nil, flogGM: nil, ppdir: nil,
+  }
+
+  fjsn = "#{odir}/backbone.json"
+  open(fjsn, "w"){ |fw| fw.puts h.to_json }
+  exit
+end
 
 ### The derived files (FastTree min-evo / gamma trees, the taxtastic
 ### pplacer package, backbone.mfa) depend only on the refpkg source files,
@@ -27,19 +70,6 @@ DERIV_VERSION = "2"
 src_key  = ([DERIV_VERSION] + [falnO, ftreO, fhmmO].map{ |f| Digest::MD5.file(f).to_s }).join("-")
 
 cache_valid = File.exist?(key_file) && File.read(key_file).strip == src_key
-
-### parse LENG / NAME of fhmm (cheap; always done)
-hmmlen  = "0"
-hmmname = ""
-open(fhmmO){ |fr|
-  while l = fr.gets
-    if l =~ /^LENG\s+(\d+)/
-      hmmlen = $1
-    elsif l =~ /^NAME\s+(\S+)/
-      hmmname = $1
-    end
-  end
-}
 
 ### Where the derived files for this run live (and what backbone.json
 ### references). By default, when the cache is valid we reference it *in
